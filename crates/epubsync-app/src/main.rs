@@ -1,12 +1,12 @@
 //! The library viewer: a window with a table of books and, when a book is
-//! selected, its details in a sidebar on the right. A Words tab swaps the
-//! table for the list of words looked up on a device. A Reload button
-//! reads the library again, and an Import button or a drop of files onto
-//! the window adds books, with a strip under the toolbar that shows the
-//! progress and gives the table the added books. A Remove… button in the
-//! sidebar removes the selected book after a dialog, and an Open button
-//! there opens the book in the system reader. A link in a description
-//! opens in the browser. The CLI edits and syncs.
+//! selected, its cover and its details in a sidebar on the right. A Words
+//! tab swaps the table for the list of words looked up on a device. A
+//! Reload button reads the library again, and an Import button or a drop
+//! of files onto the window adds books, with a strip under the toolbar
+//! that shows the progress and gives the table the added books. A Remove…
+//! button in the sidebar removes the selected book after a dialog, and an
+//! Open button there opens the book in the system reader. A link in a
+//! description opens in the browser. The CLI edits and syncs.
 
 mod description;
 mod detail;
@@ -21,12 +21,13 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use epubsync_core::config;
+use epubsync_core::cover::Cover;
 use epubsync_core::device::ReadStatus;
 use epubsync_core::library::{Book, Library, ProgressRow, WordRow, book_file_name};
 use epubsync_core::query::{self, Query, Sort, SortKey};
 use iced::event::{self, Event, Status};
 use iced::keyboard::{self, key};
-use iced::widget::{button, column, container, markdown, row, space, text, text_input};
+use iced::widget::{button, column, container, image, markdown, row, space, text, text_input};
 use iced::{Center, Element, Fill, Subscription, Task, padding, window};
 
 use crate::import::{Handoff, Import, Line, Tab};
@@ -67,6 +68,13 @@ struct Open {
     scroll: f32,
     /// The book in the sidebar, if any.
     selected: Option<Selected>,
+    /// The cover of each book the sidebar has shown, by book id. `Some`
+    /// is the thumbnail the library holds; `None` is a book the library
+    /// has no cover for, whatever the reason; a missing key is a book
+    /// the viewer has not asked about. The map lives for the window
+    /// session and holds about 40 KB a book. A removed id never comes
+    /// back, so an entry never shows the wrong cover.
+    covers: BTreeMap<i64, Option<image::Handle>>,
     /// The book the remove dialog asks about, while the dialog is shown.
     removing: Option<i64>,
     /// The last reload, remove, or open that failed, as one sentence. The
@@ -207,6 +215,7 @@ impl Open {
             query: Query::default(),
             scroll: 0.0,
             selected: None,
+            covers: BTreeMap::new(),
             removing: None,
             error: None,
             import: None,
@@ -274,9 +283,9 @@ impl Open {
         launch("open the book", move || opener::open(path))
     }
 
-    /// Puts the book in the sidebar. Its description is parsed here, so
-    /// a book that is never shown is never parsed. An id no book has
-    /// closes the sidebar.
+    /// Puts the book in the sidebar. Its description is parsed here and
+    /// its cover is read here, so a book that is never shown costs
+    /// neither. An id no book has closes the sidebar.
     fn select(&mut self, id: i64) {
         self.selected = self.books.iter().find(|b| b.id == id).map(|b| {
             let html = b.metadata.description.as_deref().unwrap_or("");
@@ -285,6 +294,39 @@ impl Open {
                 description: description::parse(html),
             }
         });
+        if self.selected.is_some() {
+            self.read_cover(id);
+        }
+    }
+
+    /// Reads a book's cover into the map, once per book. It reads one
+    /// row and opens no file.
+    ///
+    /// A book the library has not read yet gets no entry, and the next
+    /// click asks again. The read is skipped while the import task
+    /// holds the library; the reload after each imported file calls
+    /// `select` again, and that call fills the entry.
+    fn read_cover(&mut self, id: i64) {
+        if self.covers.contains_key(&id) {
+            return;
+        }
+        let Some(library) = &self.library else {
+            return;
+        };
+        match library.cover(id) {
+            Ok(Cover::Image(bytes)) => {
+                self.covers
+                    .insert(id, Some(image::Handle::from_bytes(bytes)));
+            }
+            // The reader can do nothing about any of the three, so the
+            // sidebar draws them the same. The state and its text stay
+            // in the database for `check`.
+            Ok(Cover::None | Cover::Unreadable(_) | Cover::Undecodable(_)) => {
+                self.covers.insert(id, None);
+            }
+            Ok(Cover::Unknown) => {}
+            Err(e) => self.error = Some(format!("Cover failed: {e:#}")),
+        }
     }
 
     /// Queues paths for import and starts the task if it is idle. Paths
@@ -611,6 +653,14 @@ mod tests {
             panic!("the library did not open");
         };
         open
+    }
+
+    #[test]
+    fn selecting_a_book_puts_its_cover_in_the_map() {
+        let (_dir, viewer, id) = with_one_book();
+        let open = state(&viewer);
+        assert!(open.covers[&id].is_some());
+        assert_eq!(open.error, None);
     }
 
     #[test]

@@ -6,9 +6,9 @@ use epubsync_core::device::ReadStatus;
 use epubsync_core::library::{Book, Field, ProgressRow, WordRow, book_file_name};
 use epubsync_core::metadata::format_series_number;
 use iced::widget::{
-    button, column, container, markdown, progress_bar, row, scrollable, space, text,
+    button, column, container, image, markdown, progress_bar, row, scrollable, space, text,
 };
-use iced::{Center, Color, Element, Fill, padding};
+use iced::{Center, Color, ContentFit, Element, Fill, padding};
 
 use crate::theme::{self, MONO, SANS_MEDIUM, SERIF, SERIF_MEDIUM};
 use crate::{Message, Open, Selected, format, table};
@@ -16,6 +16,8 @@ use crate::{Message, Open, Selected, format, table};
 const WIDTH: f32 = 360.0;
 /// The side padding of the header, the body, and the footer.
 const INSET: f32 = 20.0;
+/// The height of the cover at the top of the body.
+const COVER_HEIGHT: f32 = 220.0;
 
 /// The link color in the description. The markdown widget takes its
 /// colors before it is drawn, when the mode is not known, so this one
@@ -150,21 +152,39 @@ fn body<'a>(open: &'a Open, book: &'a Book, selected: &'a Selected) -> Element<'
         words = words.push(column(looked_up.into_iter().map(word)).spacing(4));
     }
 
-    column![
-        column![title, byline.wrap()].spacing(6),
-        actions,
-        theme::hline(),
-        meta,
-        theme::hline(),
-        description,
-        theme::hline(),
-        devices,
-        theme::hline(),
-        words,
-    ]
-    .spacing(14)
-    .padding(padding::top(18).bottom(24).left(INSET).right(INSET))
-    .into()
+    column![]
+        .extend(cover(open, book.id))
+        .push(column![title, byline.wrap()].spacing(6))
+        .push(actions)
+        .push(theme::hline())
+        .push(meta)
+        .push(theme::hline())
+        .push(description)
+        .push(theme::hline())
+        .push(devices)
+        .push(theme::hline())
+        .push(words)
+        .spacing(14)
+        .padding(padding::top(18).bottom(24).left(INSET).right(INSET))
+        .into()
+}
+
+/// The cover above the title, centered and `COVER_HEIGHT` tall, with the
+/// aspect ratio kept. A book the library has no cover for gets the faint
+/// words "No cover" instead. A book the library has not read yet gets
+/// nothing, and the place above the title stays empty.
+fn cover<'a>(open: &'a Open, id: i64) -> Option<Element<'a, Message>> {
+    let block: Element<'a, Message> = match open.covers.get(&id)? {
+        Some(handle) => image(handle)
+            .height(COVER_HEIGHT)
+            .content_fit(ContentFit::Contain)
+            .into(),
+        None => text("No cover")
+            .size(12.5)
+            .style(theme::text_color(|c| c.faint))
+            .into(),
+    };
+    Some(container(block).center_x(Fill).into())
 }
 
 /// A block heading in upper case: "ON DEVICE", "WORDS".

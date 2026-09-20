@@ -14,7 +14,7 @@ path = "src/main.rs"
 anyhow = "1.0.104"
 epubsync-core = { path = "../epubsync-core" }
 htmd = "0.5.5"
-iced = { version = "0.14.0", features = ["markdown"] }
+iced = { version = "0.14.0", features = ["image", "markdown"] }
 opener = "0.8.5"
 rfd = "0.17.2"
 

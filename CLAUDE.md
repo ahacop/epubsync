@@ -127,6 +127,12 @@ The window follows the system light or dark mode: `theme.rs` style
 functions read `is_dark` from the theme at draw time, so no view function
 knows the mode. The fonts are embedded from `fonts/`.
 
+`Open.covers` holds a `Handle` per book the sidebar has shown, so a
+second click on a book reads no row. `select` fills the entry through
+`Library::cover`. A book the library has no cover for gets `None` and the
+words "No cover"; a book core has not read yet gets no entry, and the
+next click asks again.
+
 `import.rs` runs `Library::import` per file on a background task. Iced
 messages must be `Clone`, so the task takes the `Library` value and hands
 it back inside `Handoff`, and the state holds `None` in between. Reload is
