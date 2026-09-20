@@ -18,6 +18,7 @@ use crate::sort_name::sort_name;
 use crate::stats::Engines;
 pub use crate::stats::Stats;
 use crate::{kepub, stats};
+pub use epubsync_epub::Cover as FileCover;
 use epubsync_epub::Epub;
 
 const TABLES_SQL: &str = include_str!("migrations/1-tables.sql");
@@ -270,6 +271,14 @@ impl Library {
             Some((state, image, detail)) => Cover::from_row(&state, image, detail),
             None => Ok(Cover::Unknown),
         }
+    }
+
+    /// The cover image the book's own file holds, at the size and in
+    /// the format the publisher stored. `Library::cover` gives the
+    /// thumbnail instead. This one opens the zip, so a display calls it
+    /// on a click and not while it draws.
+    pub fn full_cover(&self, id: i64) -> Result<FileCover> {
+        Epub::open(&self.book_path(id))?.cover()
     }
 
     fn find_same(&self, record: &Metadata) -> Result<Option<i64>> {

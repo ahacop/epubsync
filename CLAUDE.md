@@ -150,6 +150,13 @@ dialog conventions: the title names the action and the book, the body
 says what happens, the buttons are verbs, Cancel sits left of the red
 Remove, and Enter does nothing.
 
+`full_cover.rs` draws the full-size cover over the window with the same
+`stack` and `opaque` pattern. A click on the sidebar thumbnail sends
+`Message::ShowCover`, which calls `Library::full_cover` to read the image
+out of the book file. `Open.full_cover` holds the handle while the cover
+is shown, and `Message::Close` (Escape) closes it before it closes the
+sidebar.
+
 The Open button and the description links go through the `opener` crate
 on a background task, because on macOS `open` waits for the command to
 exit. A failure lands in `Open.error`, which the status bar shows.

@@ -6,9 +6,10 @@ use epubsync_core::device::ReadStatus;
 use epubsync_core::library::{Book, Field, ProgressRow, WordRow, book_file_name};
 use epubsync_core::metadata::format_series_number;
 use iced::widget::{
-    button, column, container, image, markdown, progress_bar, row, scrollable, space, text,
+    button, column, container, image, markdown, mouse_area, progress_bar, row, scrollable, space,
+    text,
 };
-use iced::{Center, Color, ContentFit, Element, Fill, padding};
+use iced::{Center, Color, ContentFit, Element, Fill, mouse, padding};
 
 use crate::theme::{self, MONO, SANS_MEDIUM, SERIF, SERIF_MEDIUM};
 use crate::{Message, Open, Selected, format, table};
@@ -170,15 +171,20 @@ fn body<'a>(open: &'a Open, book: &'a Book, selected: &'a Selected) -> Element<'
 }
 
 /// The cover above the title, centered and `COVER_HEIGHT` tall, with the
-/// aspect ratio kept. A book the library has no cover for gets the faint
-/// words "No cover" instead. A book the library has not read yet gets
-/// nothing, and the place above the title stays empty.
+/// aspect ratio kept. A click on it opens the full-size cover over the
+/// window. A book the library has no cover for gets the faint words "No
+/// cover" instead. A book the library has not read yet gets nothing, and
+/// the place above the title stays empty.
 fn cover<'a>(open: &'a Open, id: i64) -> Option<Element<'a, Message>> {
     let block: Element<'a, Message> = match open.covers.get(&id)? {
-        Some(handle) => image(handle)
-            .height(COVER_HEIGHT)
-            .content_fit(ContentFit::Contain)
-            .into(),
+        Some(handle) => mouse_area(
+            image(handle)
+                .height(COVER_HEIGHT)
+                .content_fit(ContentFit::Contain),
+        )
+        .interaction(mouse::Interaction::Pointer)
+        .on_press(Message::ShowCover)
+        .into(),
         None => text("No cover")
             .size(12.5)
             .style(theme::text_color(|c| c.faint))

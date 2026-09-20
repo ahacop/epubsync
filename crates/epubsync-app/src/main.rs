@@ -5,12 +5,14 @@
 //! of files onto the window adds books, with a strip under the toolbar
 //! that shows the progress and gives the table the added books. A Remove…
 //! button in the sidebar removes the selected book after a dialog, and an
-//! Open button there opens the book in the system reader. A link in a
+//! Open button there opens the book in the system reader. A click on the
+//! cover there opens it at full size over the window. A link in a
 //! description opens in the browser. The CLI edits and syncs.
 
 mod description;
 mod detail;
 mod format;
+mod full_cover;
 mod import;
 mod remove;
 mod table;
@@ -23,7 +25,7 @@ use std::path::PathBuf;
 use epubsync_core::config;
 use epubsync_core::cover::Cover;
 use epubsync_core::device::ReadStatus;
-use epubsync_core::library::{Book, Library, ProgressRow, WordRow, book_file_name};
+use epubsync_core::library::{Book, FileCover, Library, ProgressRow, WordRow, book_file_name};
 use epubsync_core::query::{self, Query, Sort, SortKey};
 use iced::event::{self, Event, Status};
 use iced::keyboard::{self, key};
@@ -75,6 +77,8 @@ struct Open {
     /// session and holds about 40 KB a book. A removed id never comes
     /// back, so an entry never shows the wrong cover.
     covers: BTreeMap<i64, Option<image::Handle>>,
+    /// The full-size cover over the window, while it is open.
+    full_cover: Option<image::Handle>,
     /// The book the remove dialog asks about, while the dialog is shown.
     removing: Option<i64>,
     /// The last reload, remove, or open that failed, as one sentence. The
@@ -147,6 +151,10 @@ enum Message {
     /// The reader or the browser could not be started. The status bar
     /// shows why.
     OpenFailed(String),
+    /// A click on the cover in the sidebar.
+    ShowCover,
+    /// A click on the full-size cover, or Escape.
+    HideCover,
     /// The Remove… button in the sidebar. The remove dialog opens on the
     /// selected book.
     AskRemove,
@@ -216,6 +224,7 @@ impl Open {
             scroll: 0.0,
             selected: None,
             covers: BTreeMap::new(),
+            full_cover: None,
             removing: None,
             error: None,
             import: None,
@@ -329,6 +338,26 @@ impl Open {
         }
     }
 
+    /// Reads the selected book's file and puts its cover over the
+    /// window at the size the publisher stored.
+    fn show_cover(&mut self) {
+        let Some(id) = self.selected.as_ref().map(|s| s.id) else {
+            return;
+        };
+        let Some(library) = &self.library else {
+            return;
+        };
+        let read = library.full_cover(id);
+        match read {
+            Ok(FileCover::Image(bytes)) => {
+                self.full_cover = Some(image::Handle::from_bytes(bytes));
+            }
+            Ok(FileCover::None) => self.error = Some("The book file gives no cover.".to_string()),
+            Ok(FileCover::Unreadable(why)) => self.error = Some(format!("Cover failed: {why}")),
+            Err(e) => self.error = Some(format!("Cover failed: {e:#}")),
+        }
+    }
+
     /// Queues paths for import and starts the task if it is idle. Paths
     /// that arrive while an import runs join its queue. Paths that
     /// arrive after one ended start a new strip in place of the old.
@@ -370,6 +399,7 @@ fn update(viewer: &mut Viewer, message: Message) -> Task<Message> {
         Message::Select(id) => open.select(id),
         // Escape reaches Close while the dialog is shown, and cancels it.
         Message::Close if open.removing.is_some() => open.removing = None,
+        Message::Close if open.full_cover.is_some() => open.full_cover = None,
         Message::Close => open.selected = None,
         Message::Show(pane) => {
             // The two panes share one scrollable id, so the new pane
@@ -442,6 +472,8 @@ fn update(viewer: &mut Viewer, message: Message) -> Task<Message> {
             return launch("open the link", move || opener::open_browser(uri));
         }
         Message::OpenFailed(error) => open.error = Some(error),
+        Message::ShowCover => open.show_cover(),
+        Message::HideCover => open.full_cover = None,
         Message::AskRemove => open.removing = open.selected.as_ref().map(|s| s.id),
         Message::ConfirmRemove => {
             if let Some(id) = open.removing.take() {
@@ -508,6 +540,10 @@ fn view(viewer: &Viewer) -> Element<'_, Message> {
                 .push(main)
                 .push(status_bar(open))
                 .into();
+            let window = match &open.full_cover {
+                Some(handle) => full_cover::over(window, handle),
+                None => window,
+            };
             let removing = open
                 .removing
                 .and_then(|id| open.books.iter().find(|b| b.id == id));
@@ -661,6 +697,20 @@ mod tests {
         let open = state(&viewer);
         assert!(open.covers[&id].is_some());
         assert_eq!(open.error, None);
+    }
+
+    #[test]
+    fn a_click_on_the_cover_shows_the_full_size_one_and_escape_closes_it() {
+        let (_dir, mut viewer, id) = with_one_book();
+        let _ = update(&mut viewer, Message::ShowCover);
+        let open = state(&viewer);
+        assert!(open.full_cover.is_some());
+        assert_eq!(open.error, None);
+
+        let _ = update(&mut viewer, Message::Close);
+        let open = state(&viewer);
+        assert!(open.full_cover.is_none());
+        assert_eq!(open.selected.as_ref().map(|s| s.id), Some(id));
     }
 
     #[test]
