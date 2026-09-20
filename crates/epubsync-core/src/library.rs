@@ -11,6 +11,7 @@ use rusqlite_migration::{M, Migrations};
 use serde::Serialize;
 
 use crate::config::Config;
+use crate::cover::Cover;
 use crate::device::ReadStatus;
 use crate::metadata::{Author, Metadata, Series};
 use crate::sort_name::sort_name;
@@ -23,6 +24,7 @@ const TABLES_SQL: &str = include_str!("migrations/1-tables.sql");
 const BOOKS_AUTOINCREMENT_SQL: &str = include_str!("migrations/2-books-autoincrement.sql");
 const DELETED_BOOKS_SQL: &str = include_str!("migrations/3-deleted-books.sql");
 const PROGRESS_HISTORY_SQL: &str = include_str!("migrations/4-progress-history.sql");
+const COVERS_SQL: &str = include_str!("migrations/5-covers.sql");
 const DB_NAME: &str = "library.sqlite";
 const LOCK_NAME: &str = "lock";
 
@@ -129,11 +131,13 @@ impl Library {
             .to_latest(&mut db)
             .context("migrate the database")?;
         db.execute_batch("PRAGMA foreign_keys = ON;")?;
-        Ok(Library {
+        let library = Library {
             folder,
             db,
             _lock: lock_file,
-        })
+        };
+        library.fill_covers()?;
+        Ok(library)
     }
 
     /// The path of a book's file in the library folder.
@@ -192,7 +196,80 @@ impl Library {
         if !made_sort.is_empty() || measured {
             self.write_file(id, &record, &stats)?;
         }
+
+        // 7: store the thumbnail of the cover. A source file that no
+        // longer opens writes no row, which leaves the book `Unknown`
+        // and gives the next `Library::open` the work. A bad cover does
+        // not stop an import.
+        if let Ok(cover) = source_epub.cover() {
+            self.store_cover(id, &Cover::from_file(cover))?;
+        }
         Ok(ImportOutcome::Imported { id, made_sort })
+    }
+
+    /// Writes a book's `covers` row. `Cover::Unknown` is the missing
+    /// row, so it writes nothing.
+    fn store_cover(&self, id: i64, cover: &Cover) -> Result<()> {
+        let Some(row) = cover.row() else {
+            return Ok(());
+        };
+        self.db.execute(
+            "INSERT OR REPLACE INTO covers (book_id, state, image, detail)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![id, row.state, row.image, row.detail],
+        )?;
+        Ok(())
+    }
+
+    /// Reads the file of each active book that has no `covers` row and
+    /// writes the row. `Library::open` calls it, so a book imported
+    /// before the covers table existed gets its thumbnail on the first
+    /// open after the upgrade, and no read after that opens a zip.
+    ///
+    /// A book whose file does not open keeps no row, and each open tries
+    /// it again for the cost of one failed `File::open`.
+    ///
+    /// The first open after the upgrade pays for every book at once. One
+    /// book costs about a tenth of a second, so a library of 500 books
+    /// holds the open for about a minute. Every command opens the
+    /// library, so any command can be the one that pays.
+    fn fill_covers(&self) -> Result<()> {
+        let mut stmt = self
+            .db
+            .prepare("SELECT id FROM active_books WHERE id NOT IN (SELECT book_id FROM covers)")?;
+        let ids: Vec<i64> = stmt
+            .query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        drop(stmt);
+        for id in ids {
+            let Ok(epub) = Epub::open(&self.book_path(id)) else {
+                continue;
+            };
+            let Ok(cover) = epub.cover() else {
+                continue;
+            };
+            self.store_cover(id, &Cover::from_file(cover))?;
+        }
+        Ok(())
+    }
+
+    /// The cover the library holds for a book. A book with no row gives
+    /// `Cover::Unknown`. It reads one row, writes nothing, and opens no
+    /// file, so a display can call it while it draws. The error is a
+    /// database fault.
+    pub fn cover(&self, id: i64) -> Result<Cover> {
+        let row = self
+            .db
+            .query_row(
+                "SELECT state, image, detail FROM covers WHERE book_id = ?1",
+                [id],
+                |r| Ok((r.get::<_, String>(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        match row {
+            Some((state, image, detail)) => Cover::from_row(&state, image, detail),
+            None => Ok(Cover::Unknown),
+        }
     }
 
     fn find_same(&self, record: &Metadata) -> Result<Option<i64>> {
@@ -279,9 +356,10 @@ impl Library {
         self.write_file(id, record, &stats)
     }
 
-    /// Deletes the file and its `sent` rows, then sets `deleted_at` on the
-    /// book row. The row, its authors, its stats, and its progress history
-    /// stay, so the book's word rows and history rows still have a title.
+    /// Deletes the file, its `sent` rows, and its cover, then sets
+    /// `deleted_at` on the book row. The row, its authors, its stats, and
+    /// its progress history stay, so the book's word rows and history rows
+    /// still have a title.
     pub fn remove(&mut self, id: i64) -> Result<()> {
         self.get(id)?;
         let path = self.book_path(id);
@@ -292,6 +370,7 @@ impl Library {
         }
         let tx = self.db.transaction()?;
         tx.execute("DELETE FROM sent WHERE book_id = ?1", [id])?;
+        tx.execute("DELETE FROM covers WHERE book_id = ?1", [id])?;
         tx.execute(
             "UPDATE books SET deleted_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?1",
             [id],
@@ -311,6 +390,7 @@ fn migrations() -> Migrations<'static> {
         M::up(BOOKS_AUTOINCREMENT_SQL).foreign_key_check(),
         M::up(DELETED_BOOKS_SQL).foreign_key_check(),
         M::up(PROGRESS_HISTORY_SQL).foreign_key_check(),
+        M::up(COVERS_SQL),
     ])
 }
 

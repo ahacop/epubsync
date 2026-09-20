@@ -85,6 +85,15 @@ replaced when the status turns finished again. `sync::next_row` is the
 pure rule that decides whether a read adds a row and what its
 `finished_at` is.
 
+`cover.rs` holds the `Cover` enum and `thumbnail`, which decodes a cover
+and re-encodes it as a JPEG that fits in 480 by 480 pixels. The `covers`
+table holds one row per book: `state` names the variant, `image` holds
+the thumbnail bytes, and `detail` holds the text of a fault. `CHECK`
+lines make every other shape an error. A book with no row is
+`Cover::Unknown`, and `Library::fill_covers`, which `Library::open`
+calls, reads the file of each active book that has none. `Library::cover`
+reads one row and opens no zip, so the viewer calls it while it draws.
+
 `Device` is the trait. `Kobo` is the only implementation: a mounted volume
 with `.kobo/version`, books under `EpubSync/`, and the database at
 `.kobo/KoboReader.sqlite` opened in place. The column names and the file

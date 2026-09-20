@@ -12,6 +12,7 @@ anyhow = "1.0.104"
 directories = "6.0.0"
 epubsync-epub = { path = "../epubsync-epub" }
 human_name = "2.0.4"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 readsight = "1.0.2"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 rusqlite_migration = "2.6.0"

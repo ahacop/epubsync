@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use epubsync_core::config::{self, Config};
+use epubsync_core::cover::{self, Cover};
 use epubsync_core::library::{Book, Field, ImportOutcome, Library, Stats};
 use epubsync_core::metadata::{Author, Metadata, Series};
 use epubsync_epub::Epub;
@@ -629,4 +630,117 @@ fn the_migration_copies_progress_into_the_history() {
     assert_eq!(history.len(), 1);
     assert_eq!(history[0].seen_at.len(), "2026-09-19T12:00:00Z".len());
     assert!(lib.book_history(9).unwrap().is_empty());
+}
+
+#[test]
+fn an_import_stores_the_thumbnail_of_the_cover() {
+    let s = setup();
+    let mut lib = Library::open(&s.config).unwrap();
+    let source = common::write_epub(&s.root, "lhod.epub", common::EPUB2_OPF);
+    let ImportOutcome::Imported { id, .. } = lib.import(&source, false).unwrap() else {
+        panic!("not imported");
+    };
+
+    let Cover::Image(bytes) = lib.cover(id).unwrap() else {
+        panic!("{:?}", lib.cover(id).unwrap());
+    };
+    assert_eq!(&bytes[..3], b"\xFF\xD8\xFF");
+    assert_eq!(bytes, cover::thumbnail(common::COVER_JPEG).unwrap());
+}
+
+#[test]
+fn a_book_whose_file_names_no_cover_gives_none() {
+    let s = setup();
+    let mut lib = Library::open(&s.config).unwrap();
+    let source = common::write_epub(&s.root, "candide.epub", common::BARE_OPF);
+    let ImportOutcome::Imported { id, .. } = lib.import(&source, false).unwrap() else {
+        panic!("not imported");
+    };
+    assert_eq!(lib.cover(id).unwrap(), Cover::None);
+}
+
+#[test]
+fn a_cover_the_file_does_not_hold_imports_and_gives_unreadable() {
+    let s = setup();
+    let mut lib = Library::open(&s.config).unwrap();
+    let source = common::write_epub(&s.root, "forest.epub", common::MISSING_COVER_OPF);
+    let ImportOutcome::Imported { id, .. } = lib.import(&source, false).unwrap() else {
+        panic!("not imported");
+    };
+    let Cover::Unreadable(why) = lib.cover(id).unwrap() else {
+        panic!("{:?}", lib.cover(id).unwrap());
+    };
+    assert!(why.contains("no-such-cover.jpg"), "{why}");
+}
+
+#[test]
+fn a_cover_entry_that_is_not_an_image_gives_undecodable() {
+    let s = setup();
+    let mut lib = Library::open(&s.config).unwrap();
+    let source = common::write_book_with_cover(
+        &s.root,
+        "lhod.epub",
+        common::EPUB2_OPF,
+        b"<svg xmlns='http://www.w3.org/2000/svg'/>",
+    );
+    let ImportOutcome::Imported { id, .. } = lib.import(&source, false).unwrap() else {
+        panic!("not imported");
+    };
+    let Cover::Undecodable(why) = lib.cover(id).unwrap() else {
+        panic!("{:?}", lib.cover(id).unwrap());
+    };
+    assert!(!why.is_empty());
+}
+
+#[test]
+fn a_book_with_no_row_gives_unknown_and_the_next_open_fills_it() {
+    let s = setup();
+    let mut lib = Library::open(&s.config).unwrap();
+    let source = common::write_epub(&s.root, "lhod.epub", common::EPUB2_OPF);
+    let ImportOutcome::Imported { id, .. } = lib.import(&source, false).unwrap() else {
+        panic!("not imported");
+    };
+    lib.db.execute("DELETE FROM covers", []).unwrap();
+    assert_eq!(lib.cover(id).unwrap(), Cover::Unknown);
+    drop(lib);
+
+    let lib = Library::open(&s.config).unwrap();
+    let Cover::Image(bytes) = lib.cover(id).unwrap() else {
+        panic!("the backfill wrote no image");
+    };
+    assert_eq!(bytes, cover::thumbnail(common::COVER_JPEG).unwrap());
+}
+
+#[test]
+fn removing_a_book_deletes_its_cover_row() {
+    let s = setup();
+    let mut lib = Library::open(&s.config).unwrap();
+    let source = common::write_epub(&s.root, "lhod.epub", common::EPUB2_OPF);
+    let ImportOutcome::Imported { id, .. } = lib.import(&source, false).unwrap() else {
+        panic!("not imported");
+    };
+
+    lib.remove(id).unwrap();
+    assert_eq!(lib.cover(id).unwrap(), Cover::Unknown);
+    // The book is gone from `active_books`, so the backfill on the next
+    // open writes no row for it.
+    drop(lib);
+    let lib = Library::open(&s.config).unwrap();
+    assert_eq!(lib.cover(id).unwrap(), Cover::Unknown);
+}
+
+#[test]
+fn a_cover_row_the_table_does_not_allow_is_an_error() {
+    let s = setup();
+    let lib = Library::open(&s.config).unwrap();
+    lib.db
+        .execute_batch(
+            "INSERT INTO books (id, title) VALUES (1, 'Candide');
+             PRAGMA ignore_check_constraints = ON;
+             INSERT INTO covers (book_id, state, image) VALUES (1, 'none', x'FFD8FF');
+             PRAGMA ignore_check_constraints = OFF;",
+        )
+        .unwrap();
+    let err = lib.cover(1).unwrap_err();
+    assert!(err.to_string().contains("none"), "{err}");
 }

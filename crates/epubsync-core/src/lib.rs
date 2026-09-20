@@ -1,4 +1,5 @@
 pub mod config;
+pub mod cover;
 pub mod device;
 pub mod kepub;
 pub mod kobo;
