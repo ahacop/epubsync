@@ -1,5 +1,6 @@
-//! Rebuilds an EPUB zip with one entry replaced. Every other entry is
-//! copied raw, so its compressed bytes, its order, and its method stay.
+//! Reads one entry out of an EPUB zip, and rebuilds the zip with one
+//! entry replaced. A rebuild copies every other entry raw, so its
+//! compressed bytes, its order, and its method stay.
 
 #[cfg(test)]
 mod tests;
@@ -57,4 +58,32 @@ pub fn rewrite(path: &Path, opf_path: &str, new_opf: &str) -> Result<()> {
         .map_err(|e| e.error)
         .with_context(|| format!("replace {}", path.display()))?;
     Ok(())
+}
+
+/// What a zip gives for one entry name.
+pub enum Entry {
+    /// The bytes of the entry.
+    Bytes(Vec<u8>),
+    /// The zip opened and does not give the entry: it holds no such
+    /// name, or the entry did not read. The text says which.
+    Missing(String),
+}
+
+/// Reads the entry named `name` out of the EPUB at `path`. The error is
+/// the file itself: it did not open, or it is not a zip. A fault in the
+/// one entry is `Entry::Missing`, because the rest of the file is still
+/// good and the caller can go on without it.
+pub fn read_entry(path: &Path, name: &str) -> Result<Entry> {
+    let file = File::open(path).with_context(|| format!("open {}", path.display()))?;
+    let mut archive = zip::ZipArchive::new(BufReader::new(file))
+        .with_context(|| format!("read {}", path.display()))?;
+    let mut entry = match archive.by_name(name) {
+        Ok(entry) => entry,
+        Err(e) => return Ok(Entry::Missing(format!("{name}: {e}"))),
+    };
+    let mut bytes = Vec::with_capacity(entry.size() as usize);
+    match std::io::copy(&mut entry, &mut bytes) {
+        Ok(_) => Ok(Entry::Bytes(bytes)),
+        Err(e) => Ok(Entry::Missing(format!("{name}: {e}"))),
+    }
 }

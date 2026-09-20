@@ -1,6 +1,7 @@
 //! Reads and writes the EPUB files EpubSync keeps: the metadata record, the
-//! word count and reading ease, and the book text. `Epub` is the whole
-//! interface. The crates above it never see the zip, the OPF, or the XML.
+//! word count and reading ease, the book text, and the cover image. `Epub`
+//! is the whole interface. The crates above it never see the zip, the OPF,
+//! or the XML.
 //!
 //! The files come from many publishers, and the layers under `Epub` absorb
 //! what those files do:
@@ -30,9 +31,25 @@ pub mod fixtures;
 pub mod metadata;
 mod opf;
 mod splice;
+#[cfg(test)]
+mod tests;
 mod text;
 
 pub use metadata::{Author, Metadata, Series, Stats};
+
+/// What a file gives for its cover. A file that names a cover the zip
+/// does not hold still opens and still imports, so a publisher's fault
+/// is a variant here and not an error.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Cover {
+    /// The OPF names no cover.
+    None,
+    /// The bytes of the entry at the cover path.
+    Image(Vec<u8>),
+    /// The OPF names a cover the file does not give: the zip holds no
+    /// such entry, or the entry does not read. The text says which.
+    Unreadable(String),
+}
 
 /// One EPUB or KEPUB file on disk with its OPF read.
 #[derive(Debug, Clone)]
@@ -83,6 +100,21 @@ impl Epub {
     /// Path of the cover image inside the zip.
     pub fn cover_path(&self) -> Option<&str> {
         self.opf.cover_path.as_deref()
+    }
+
+    /// The bytes of the cover image. A file that names no cover gives
+    /// `None`, and one that names a cover the zip does not give gives
+    /// `Unreadable` with the reason. The bytes are as the publisher
+    /// stored them, in whatever image format that is. The error is the
+    /// file: it did not open, or it is not a zip.
+    pub fn cover(&self) -> Result<Cover> {
+        let Some(name) = self.cover_path() else {
+            return Ok(Cover::None);
+        };
+        Ok(match archive::read_entry(&self.path, name)? {
+            archive::Entry::Bytes(bytes) => Cover::Image(bytes),
+            archive::Entry::Missing(why) => Cover::Unreadable(why),
+        })
     }
 
     /// The text of the book: every text node under `body` in every spine
