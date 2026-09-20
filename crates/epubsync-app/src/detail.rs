@@ -1,6 +1,7 @@
-//! The sidebar: the selected book's details, the Open and Remove…
-//! buttons, its description, its progress on each device, and the words
-//! looked up in it.
+//! The sidebar: the selected book's details, the Open, Edit, and
+//! Remove… buttons, its description, its progress on each device, and
+//! the words looked up in it. The Edit button puts the form from
+//! `edit.rs` in the body in place of the details.
 
 use epubsync_core::device::ReadStatus;
 use epubsync_core::library::{Book, Field, ProgressRow, WordRow, book_file_name};
@@ -12,11 +13,11 @@ use iced::widget::{
 use iced::{Center, Color, ContentFit, Element, Fill, mouse, padding};
 
 use crate::theme::{self, MONO, SANS_MEDIUM, SERIF, SERIF_MEDIUM};
-use crate::{Message, Open, Selected, format, table};
+use crate::{Message, Open, Selected, Sidebar, edit, format, table};
 
 const WIDTH: f32 = 360.0;
 /// The side padding of the header, the body, and the footer.
-const INSET: f32 = 20.0;
+pub(super) const INSET: f32 = 20.0;
 /// The height of the cover at the top of the body.
 const COVER_HEIGHT: f32 = 220.0;
 
@@ -26,12 +27,16 @@ const COVER_HEIGHT: f32 = 220.0;
 const LINK: Color = Color::from_rgb8(0x4A, 0x8F, 0xA0);
 
 /// The sidebar: a header, a scrollable body, and a footer, with a 1 px
-/// line on its left.
-pub fn view<'a>(open: &'a Open, book: &'a Book, selected: &'a Selected) -> Element<'a, Message> {
+/// line on its left. The body is the details or the edit form.
+pub fn view<'a>(open: &'a Open, book: &'a Book, sidebar: &'a Sidebar) -> Element<'a, Message> {
+    let shown: Element<'a, Message> = match sidebar {
+        Sidebar::Read(selected) => body(open, book, selected),
+        Sidebar::Edit(form) => edit::body(open, book, form),
+    };
     let pane = column![
         header(book.id),
         theme::hline(),
-        scrollable(body(open, book, selected)).height(Fill),
+        scrollable(shown).height(Fill),
         theme::hline(),
         footer(open, book),
     ];
@@ -85,11 +90,17 @@ fn body<'a>(open: &'a Open, book: &'a Book, selected: &'a Selected) -> Element<'
         .on_press(Message::OpenBook)
         .padding([4, 9])
         .style(theme::action);
+    // Edit is on in every state, because the form is built from the
+    // book alone. Its Save button is the one that needs the library.
+    let edit_button = button(text("Edit").size(12))
+        .on_press(Message::Edit)
+        .padding([4, 9])
+        .style(theme::action);
     let remove = button(text("Remove…").size(12))
         .on_press_maybe(open.library.is_some().then_some(Message::AskRemove))
         .padding([4, 9])
         .style(theme::danger);
-    let actions = row![open_button, remove].spacing(8);
+    let actions = row![open_button, edit_button, remove].spacing(8);
 
     let mut meta = column![].spacing(6);
     for f in book.fields() {
@@ -175,7 +186,7 @@ fn body<'a>(open: &'a Open, book: &'a Book, selected: &'a Selected) -> Element<'
 /// window. A book the library has no cover for gets the faint words "No
 /// cover" instead. A book the library has not read yet gets nothing, and
 /// the place above the title stays empty.
-fn cover<'a>(open: &'a Open, id: i64) -> Option<Element<'a, Message>> {
+pub(super) fn cover<'a>(open: &'a Open, id: i64) -> Option<Element<'a, Message>> {
     let block: Element<'a, Message> = match open.covers.get(&id)? {
         Some(handle) => mouse_area(
             image(handle)
@@ -217,7 +228,10 @@ fn word(w: &WordRow) -> Element<'_, Message> {
 }
 
 /// A label and its value on one line.
-fn field<'a>(label: &'a str, value: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+pub(super) fn field<'a>(
+    label: &'a str,
+    value: impl Into<Element<'a, Message>>,
+) -> Element<'a, Message> {
     row![
         text(label)
             .size(12.5)

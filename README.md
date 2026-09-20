@@ -95,9 +95,11 @@ table for every word looked up on a device, newest first, with the book,
 the device, and the day, and the filter field narrows it by word or book.
 The Open button in the sidebar opens the book in the system reader, and a
 link in a description opens in the browser. The Import button
-and a drop of files onto the window add books. The Remove… button in the
-sidebar removes the selected book after a dialog that says what the
-removal does. The CLI stays the way to edit and sync.
+and a drop of files onto the window add books. The Edit button in the
+sidebar turns the details into a form with one input per field, and Save
+writes the fields to the library and to the book file. The Remove… button
+in the sidebar removes the selected book after a dialog that says what the
+removal does. The CLI stays the way to sync.
 
 ```sh
 nix run github:ahacop/epubsync#app   # or, after brew install: epubsync-app

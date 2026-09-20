@@ -8,7 +8,7 @@
 
 use epubsync_core::device::ReadStatus;
 use iced::font::Weight;
-use iced::widget::{button, container, progress_bar, text, text_input};
+use iced::widget::{button, container, progress_bar, text, text_editor, text_input};
 use iced::{Background, Border, Color, Element, Fill, Font, Shadow, Theme, Vector, border};
 
 /// The interface typeface.
@@ -330,6 +330,41 @@ pub fn filter(theme: &Theme, status: text_input::Status) -> text_input::Style {
         placeholder: c.faint,
         value: c.ink,
         selection: c.accent_tint,
+    }
+}
+
+/// The description editor in the edit form: the filter field's colors
+/// in a box of the same shape.
+pub fn editor(theme: &Theme, status: text_editor::Status) -> text_editor::Style {
+    let c = colors(theme);
+    let focused = matches!(status, text_editor::Status::Focused { .. });
+    text_editor::Style {
+        background: Background::Color(c.surface),
+        border: Border {
+            color: if focused { c.accent } else { c.line_strong },
+            width: 1.0,
+            radius: 6.0.into(),
+        },
+        placeholder: c.faint,
+        value: c.ink,
+        selection: c.accent_tint,
+    }
+}
+
+/// The button that commits a form, such as Save in the edit form: white
+/// text on `accent`. The label reads in `faint` on `surface_2` while
+/// the button is off.
+pub fn primary(theme: &Theme, status: button::Status) -> button::Style {
+    let c = colors(theme);
+    let (ground, ink) = match status {
+        button::Status::Disabled => (c.surface_2, c.faint),
+        _ => (c.accent, Color::WHITE),
+    };
+    button::Style {
+        background: Some(Background::Color(ground)),
+        text_color: ink,
+        border: border::rounded(6),
+        ..button::Style::default()
     }
 }
 

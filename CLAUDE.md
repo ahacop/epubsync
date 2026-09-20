@@ -43,8 +43,8 @@ The workspace has four crates in one dependency direction:
 - `epubsync-core` holds the library, the device layer, the sync, the Kobo
   device, the config, and the kepubify FFI.
 - `epubsync-cli` (binary `epubsync`) and `epubsync-app` (binary
-  `epubsync-app`) sit on top of core. The viewer imports and removes
-  books; every other write goes through the CLI.
+  `epubsync-app`) sit on top of core. The viewer imports, edits, and
+  removes books; sync goes through the CLI.
 
 ### epubsync-epub
 
@@ -141,6 +141,22 @@ While the import strip is shown, the books pane draws the rows of the
 strip's tab (Added, Skipped, Failed) through the same query, and `Open`
 keeps the query and the scroll offset from before the import in `before`
 until the × puts them back.
+
+`Open.sidebar` is an `Option<Sidebar>`. `Sidebar::Read` holds the book
+id and its parsed description; `Sidebar::Edit` holds the `edit::Form`.
+`Sidebar::id` gives the book id in either view, and the table, the Open
+button, the cover, and the remove dialog all read it. `Open::select`
+puts the read view back, so it is also what Cancel and a saved edit
+call. `Open::reload` keeps a form as it is, so an import during an edit
+throws away no typed text.
+
+`edit.rs` holds the form. `Form::new` fills one input per field from a
+book, and `Form::record` reads the inputs back as a `Metadata` record or
+gives one sentence for the form's error line. `Form::record` is where
+the field rules live: what an empty input clears, when an author gets a
+made-up sort name, and that the description goes in as typed, HTML and
+all. It is pure, so its tests build a form and read the record. The
+module doc lists the rules.
 
 `remove.rs` draws the remove dialog over the window with `stack` and
 `opaque`, the Iced modal pattern. `Open.removing` holds the book id while

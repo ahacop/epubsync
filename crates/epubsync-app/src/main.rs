@@ -7,10 +7,13 @@
 //! button in the sidebar removes the selected book after a dialog, and an
 //! Open button there opens the book in the system reader. A click on the
 //! cover there opens it at full size over the window. A link in a
-//! description opens in the browser. The CLI edits and syncs.
+//! description opens in the browser. An Edit button in the sidebar turns
+//! the body into a form that writes the book's fields back to the
+//! library. The CLI syncs.
 
 mod description;
 mod detail;
+mod edit;
 mod format;
 mod full_cover;
 mod import;
@@ -32,6 +35,7 @@ use iced::keyboard::{self, key};
 use iced::widget::{button, column, container, image, markdown, row, space, text, text_input};
 use iced::{Center, Element, Fill, Subscription, Task, padding, window};
 
+use crate::edit::Form;
 use crate::import::{Handoff, Import, Line, Tab};
 use crate::theme::{BODY, MONO, SANS_SEMIBOLD};
 
@@ -68,8 +72,8 @@ struct Open {
     /// The scroll offset of the pane in view, in pixels. The pane builds
     /// only the rows in view at that offset.
     scroll: f32,
-    /// The book in the sidebar, if any.
-    selected: Option<Selected>,
+    /// What the sidebar shows, if it is open.
+    sidebar: Option<Sidebar>,
     /// The cover of each book the sidebar has shown, by book id. `Some`
     /// is the thumbnail the library holds; `None` is a book the library
     /// has no cover for, whatever the reason; a missing key is a book
@@ -101,7 +105,23 @@ enum Pane {
     Words,
 }
 
-/// The book in the sidebar.
+/// What the sidebar shows: a book's details, or the form that edits them.
+enum Sidebar {
+    Read(Selected),
+    Edit(Form),
+}
+
+impl Sidebar {
+    /// The book in the sidebar, in either view.
+    fn id(&self) -> i64 {
+        match self {
+            Sidebar::Read(selected) => selected.id,
+            Sidebar::Edit(form) => form.id,
+        }
+    }
+}
+
+/// The book in the sidebar's read view.
 #[derive(Debug, Clone)]
 struct Selected {
     id: i64,
@@ -155,6 +175,15 @@ enum Message {
     ShowCover,
     /// A click on the full-size cover, or Escape.
     HideCover,
+    /// The Edit button in the sidebar. The body becomes the form.
+    Edit,
+    /// A change to one input of the form.
+    Form(edit::Change),
+    /// The form's Save button, or Enter in one of its single-line
+    /// inputs.
+    Save,
+    /// The form's Cancel button, or Escape. The read view comes back.
+    CancelEdit,
     /// The Remove… button in the sidebar. The remove dialog opens on the
     /// selected book.
     AskRemove,
@@ -222,7 +251,7 @@ impl Open {
             pane: Pane::Books,
             query: Query::default(),
             scroll: 0.0,
-            selected: None,
+            sidebar: None,
             covers: BTreeMap::new(),
             full_cover: None,
             removing: None,
@@ -251,19 +280,90 @@ impl Open {
     }
 
     /// Reads the library again. The sort, the filter, and the scroll
-    /// offset stay. The sidebar stays on its book with the description
-    /// parsed again, and closes when the book is gone. A read that
-    /// fails keeps the rows from the last read and puts the error in
-    /// the status bar.
+    /// offset stay. The sidebar stays on its book, and closes when the
+    /// book is gone. A read that fails keeps the rows from the last
+    /// read and puts the error in the status bar.
+    ///
+    /// The read view gets its description parsed again. The form keeps
+    /// the text the reader typed, so a reload during an edit throws
+    /// none of it away.
     ///
     /// The viewer holds the library lock, so no other process writes
     /// while the window is open. A write from the viewer ends with a
     /// reload.
     fn reload(&mut self) {
         self.error = self.read().err().map(|e| format!("Reload failed: {e:#}"));
-        if let Some(id) = self.selected.as_ref().map(|s| s.id) {
-            self.select(id);
+        let Some(id) = self.sidebar.as_ref().map(Sidebar::id) else {
+            return;
+        };
+        match self.sidebar {
+            Some(Sidebar::Read(_)) => self.select(id),
+            Some(Sidebar::Edit(_)) if !self.books.iter().any(|b| b.id == id) => {
+                self.sidebar = None;
+            }
+            _ => {}
         }
+    }
+
+    /// Puts the form in the sidebar on the book it shows. A sidebar
+    /// that already shows the form, or no sidebar, changes nothing.
+    fn edit(&mut self) {
+        let Some(Sidebar::Read(selected)) = &self.sidebar else {
+            return;
+        };
+        let id = selected.id;
+        if let Some(book) = self.books.iter().find(|b| b.id == id) {
+            self.sidebar = Some(Sidebar::Edit(Form::new(book)));
+        }
+    }
+
+    /// Writes the form's record to the library and puts the read view
+    /// back. A record the inputs do not make, and a write that fails,
+    /// keep the form and put one sentence in its error line.
+    ///
+    /// The library reads again either way, because `Library::edit`
+    /// writes the row before the file, and a file write that fails
+    /// still leaves a changed row.
+    fn save(&mut self) {
+        // The Save button is off while the import task holds the
+        // library, so this guards a stale message only.
+        if self.library.is_none() {
+            return;
+        }
+        let Some(Sidebar::Edit(form)) = &mut self.sidebar else {
+            return;
+        };
+        let id = form.id;
+        let record = match form.record() {
+            Ok(record) => record,
+            Err(why) => {
+                form.error = Some(why);
+                return;
+            }
+        };
+        let result = self
+            .library
+            .as_mut()
+            .expect("the library is here")
+            .edit(id, &record);
+        self.reload();
+        match result {
+            Ok(()) => self.select(id),
+            Err(e) => {
+                if let Some(Sidebar::Edit(form)) = &mut self.sidebar {
+                    form.error = Some(format!("Save failed: {e:#}"));
+                }
+            }
+        }
+    }
+
+    /// Drops the form and puts the read view back on its book.
+    fn cancel_edit(&mut self) {
+        let Some(Sidebar::Edit(form)) = &self.sidebar else {
+            return;
+        };
+        let id = form.id;
+        self.select(id);
     }
 
     /// Removes a book and reads the library again, which closes the
@@ -285,25 +385,26 @@ impl Open {
     /// Opens the selected book's file in the system reader, or does
     /// nothing while no book is selected.
     fn open_book(&self) -> Task<Message> {
-        let Some(selected) = &self.selected else {
+        let Some(id) = self.sidebar.as_ref().map(Sidebar::id) else {
             return Task::none();
         };
-        let path = self.folder.join(book_file_name(selected.id));
+        let path = self.folder.join(book_file_name(id));
         launch("open the book", move || opener::open(path))
     }
 
-    /// Puts the book in the sidebar. Its description is parsed here and
-    /// its cover is read here, so a book that is never shown costs
-    /// neither. An id no book has closes the sidebar.
+    /// Puts a book's read view in the sidebar, in place of the form
+    /// when the form is shown. Its description is parsed here and its
+    /// cover is read here, so a book that is never shown costs neither.
+    /// An id no book has closes the sidebar.
     fn select(&mut self, id: i64) {
-        self.selected = self.books.iter().find(|b| b.id == id).map(|b| {
+        self.sidebar = self.books.iter().find(|b| b.id == id).map(|b| {
             let html = b.metadata.description.as_deref().unwrap_or("");
-            Selected {
+            Sidebar::Read(Selected {
                 id,
                 description: description::parse(html),
-            }
+            })
         });
-        if self.selected.is_some() {
+        if self.sidebar.is_some() {
             self.read_cover(id);
         }
     }
@@ -341,7 +442,7 @@ impl Open {
     /// Reads the selected book's file and puts its cover over the
     /// window at the size the publisher stored.
     fn show_cover(&mut self) {
-        let Some(id) = self.selected.as_ref().map(|s| s.id) else {
+        let Some(id) = self.sidebar.as_ref().map(Sidebar::id) else {
             return;
         };
         let Some(library) = &self.library else {
@@ -400,7 +501,12 @@ fn update(viewer: &mut Viewer, message: Message) -> Task<Message> {
         // Escape reaches Close while the dialog is shown, and cancels it.
         Message::Close if open.removing.is_some() => open.removing = None,
         Message::Close if open.full_cover.is_some() => open.full_cover = None,
-        Message::Close => open.selected = None,
+        // A focused text input takes the first Escape to drop its
+        // focus, so the second one reaches here and cancels the edit.
+        // The × in the header sends Close too, so a first click on it
+        // cancels the edit and a second closes the sidebar.
+        Message::Close if matches!(open.sidebar, Some(Sidebar::Edit(_))) => open.cancel_edit(),
+        Message::Close => open.sidebar = None,
         Message::Show(pane) => {
             // The two panes share one scrollable id, so the new pane
             // starts at the top rather than at the old pane's offset.
@@ -474,7 +580,15 @@ fn update(viewer: &mut Viewer, message: Message) -> Task<Message> {
         Message::OpenFailed(error) => open.error = Some(error),
         Message::ShowCover => open.show_cover(),
         Message::HideCover => open.full_cover = None,
-        Message::AskRemove => open.removing = open.selected.as_ref().map(|s| s.id),
+        Message::Edit => open.edit(),
+        Message::Form(change) => {
+            if let Some(Sidebar::Edit(form)) = &mut open.sidebar {
+                form.apply(change);
+            }
+        }
+        Message::Save => open.save(),
+        Message::CancelEdit => open.cancel_edit(),
+        Message::AskRemove => open.removing = open.sidebar.as_ref().map(Sidebar::id),
         Message::ConfirmRemove => {
             if let Some(id) = open.removing.take() {
                 open.remove(id);
@@ -520,13 +634,13 @@ fn view(viewer: &Viewer) -> Element<'_, Message> {
                     (words::view(open, rows), n)
                 }
             };
-            let shown = open.selected.as_ref().and_then(|s| {
-                let book = open.books.iter().find(|b| b.id == s.id)?;
+            let shown = open.sidebar.as_ref().and_then(|s| {
+                let book = open.books.iter().find(|b| b.id == s.id())?;
                 Some((book, s))
             });
             let mut main = row![pane].height(Fill);
-            if let Some((book, selected)) = shown {
-                main = main.push(detail::view(open, book, selected));
+            if let Some((book, sidebar)) = shown {
+                main = main.push(detail::view(open, book, sidebar));
             }
             // The import strip sits under the toolbar. A drag over the
             // window shows the drop hint there while no import is shown.
@@ -691,6 +805,27 @@ mod tests {
         open
     }
 
+    /// The form the sidebar shows, or a panic when it shows anything
+    /// else.
+    fn form(viewer: &Viewer) -> &Form {
+        let Some(Sidebar::Edit(form)) = &state(viewer).sidebar else {
+            panic!("the sidebar does not show the form");
+        };
+        form
+    }
+
+    fn title(viewer: &Viewer) -> &str {
+        &state(viewer).books[0].metadata.title
+    }
+
+    fn revision(viewer: &Viewer) -> i64 {
+        state(viewer).books[0].revision
+    }
+
+    fn typed(title: &str) -> Message {
+        Message::Form(edit::Change::Title(title.to_string()))
+    }
+
     #[test]
     fn selecting_a_book_puts_its_cover_in_the_map() {
         let (_dir, viewer, id) = with_one_book();
@@ -710,7 +845,7 @@ mod tests {
         let _ = update(&mut viewer, Message::Close);
         let open = state(&viewer);
         assert!(open.full_cover.is_none());
-        assert_eq!(open.selected.as_ref().map(|s| s.id), Some(id));
+        assert_eq!(open.sidebar.as_ref().map(Sidebar::id), Some(id));
     }
 
     #[test]
@@ -726,7 +861,7 @@ mod tests {
         let open = state(&viewer);
         assert_eq!(open.removing, None);
         assert!(open.books.is_empty());
-        assert!(open.selected.is_none());
+        assert!(open.sidebar.is_none());
         assert_eq!(open.error, None);
         assert!(!path.exists());
     }
@@ -738,7 +873,7 @@ mod tests {
         let _ = update(&mut viewer, Message::Close);
         let open = state(&viewer);
         assert_eq!(open.removing, None);
-        assert_eq!(open.selected.as_ref().map(|s| s.id), Some(id));
+        assert_eq!(open.sidebar.as_ref().map(Sidebar::id), Some(id));
         assert_eq!(open.books.len(), 1);
     }
 
@@ -755,5 +890,80 @@ mod tests {
         assert_eq!(open.removing, None);
         assert_eq!(open.books.len(), 1);
         drop(library);
+    }
+
+    #[test]
+    fn edit_then_save_writes_the_record_and_shows_the_read_view() {
+        let (_dir, mut viewer, id) = with_one_book();
+        let before = revision(&viewer);
+
+        let _ = update(&mut viewer, Message::Edit);
+        let _ = update(&mut viewer, typed("Renamed"));
+        let _ = update(&mut viewer, Message::Save);
+
+        let open = state(&viewer);
+        assert_eq!(open.books[0].metadata.title, "Renamed");
+        assert_eq!(open.books[0].revision, before + 1);
+        assert!(matches!(open.sidebar, Some(Sidebar::Read(_))));
+        assert_eq!(open.sidebar.as_ref().map(Sidebar::id), Some(id));
+        assert_eq!(open.error, None);
+    }
+
+    #[test]
+    fn save_with_an_empty_title_keeps_the_form() {
+        let (_dir, mut viewer, _id) = with_one_book();
+        let before = revision(&viewer);
+
+        let _ = update(&mut viewer, Message::Edit);
+        let _ = update(&mut viewer, typed("   "));
+        let _ = update(&mut viewer, Message::Save);
+
+        assert_eq!(form(&viewer).error.as_deref(), Some("The title is empty."));
+        assert_eq!(revision(&viewer), before);
+    }
+
+    #[test]
+    fn escape_cancels_the_edit_and_keeps_the_book() {
+        let (_dir, mut viewer, id) = with_one_book();
+        let before = title(&viewer).to_string();
+
+        let _ = update(&mut viewer, Message::Edit);
+        let _ = update(&mut viewer, typed("Renamed"));
+        let _ = update(&mut viewer, Message::Close);
+
+        let open = state(&viewer);
+        assert!(matches!(open.sidebar, Some(Sidebar::Read(_))));
+        assert_eq!(open.sidebar.as_ref().map(Sidebar::id), Some(id));
+        assert_eq!(open.books[0].metadata.title, before);
+    }
+
+    #[test]
+    fn reload_keeps_the_form() {
+        let (_dir, mut viewer, _id) = with_one_book();
+        let _ = update(&mut viewer, Message::Edit);
+        let _ = update(&mut viewer, typed("Typed"));
+        let _ = update(&mut viewer, Message::Reload);
+        assert_eq!(form(&viewer).title, "Typed");
+    }
+
+    #[test]
+    fn save_is_skipped_while_the_import_task_holds_the_library() {
+        let (_dir, mut viewer, _id) = with_one_book();
+        let before = title(&viewer).to_string();
+        let Viewer::Open(open) = &mut viewer else {
+            panic!("the library did not open");
+        };
+        let library = open.library.take();
+
+        let _ = update(&mut viewer, Message::Edit);
+        let _ = update(&mut viewer, typed("Renamed"));
+        let _ = update(&mut viewer, Message::Save);
+
+        assert!(matches!(state(&viewer).sidebar, Some(Sidebar::Edit(_))));
+        assert_eq!(title(&viewer), before);
+        let Viewer::Open(open) = &mut viewer else {
+            panic!("the library did not open");
+        };
+        open.library = library;
     }
 }

@@ -15,7 +15,7 @@ use iced::widget::{
 use iced::{Center, Element, Fill, Length, Right, Size, Task, padding};
 
 use crate::theme::{self, BODY, MONO, SANS_MEDIUM};
-use crate::{Message, Open, format};
+use crate::{Message, Open, Sidebar, format};
 
 /// The columns from left to right.
 const COLUMNS: [SortKey; 9] = [
@@ -164,7 +164,7 @@ pub fn file_name(path: &Path) -> String {
 
 /// The table body: the rows the query selected, built through `rows`.
 fn body<'a>(open: &'a Open, rows: &[&'a Book], size: Size) -> Element<'a, Message> {
-    let selected = open.selected.as_ref().map(|s| s.id);
+    let selected = open.sidebar.as_ref().map(Sidebar::id);
     self::rows(open.scroll, size, rows.len(), |i| {
         book_row(rows[i], &open.progress, selected == Some(rows[i].id))
     })
