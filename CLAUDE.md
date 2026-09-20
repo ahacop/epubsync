@@ -135,10 +135,9 @@ dialog conventions: the title names the action and the book, the body
 says what happens, the buttons are verbs, Cancel sits left of the red
 Remove, and Enter does nothing.
 
-The file path, the folder path, and the description links go through the
-`opener` crate on a background task, because on macOS `open` waits for
-the command to exit. A failure lands in `Open.error`, which the status
-bar shows.
+The Open button and the description links go through the `opener` crate
+on a background task, because on macOS `open` waits for the command to
+exit. A failure lands in `Open.error`, which the status bar shows.
 
 ## Versions and releases
 

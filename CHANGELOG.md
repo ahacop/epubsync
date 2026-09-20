@@ -44,7 +44,7 @@ strip reads "Imported 12 files in 1 min 14 s", and the × on it puts the
 table back to the sort, the filter, and the scroll from before the
 import.
 
-The viewer removes books. The sidebar footer gets a Remove… button, and
+The viewer removes books. The sidebar gets a red Remove… button, and
 a dialog over the window asks "Remove “The Left Hand of Darkness”?" and
 says what happens: the file is deleted from the library folder, the next
 sync takes the book off any device it was sent to, and the reading
@@ -53,12 +53,10 @@ button, and Escape or a click outside the dialog cancels. The removal is
 the same as `epubsync remove`, and the table reads the library again
 after it.
 
-The viewer opens paths and links. A click on the file path in the
-sidebar footer shows the file in the system file manager, a click on the
-folder path in the status bar opens the library folder, and a link in a
-description opens in the browser. Before, a link click did nothing.
-Should the file manager or the browser fail to start, the status bar
-says why.
+The viewer opens books. An Open button under the title in the sidebar
+opens the book in the system reader. A link
+in a description opens in the browser; before, a link click did nothing.
+Should the reader or the browser fail to start, the status bar says why.
 
 An import that fails after the conversion, and an edit whose zip rewrite
 fails partway, no longer leave a temp file in the library folder. Both

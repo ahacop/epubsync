@@ -1,5 +1,6 @@
-//! The sidebar: the selected book's details, its description, its
-//! progress on each device, and the words looked up in it.
+//! The sidebar: the selected book's details, the Open and Remove…
+//! buttons, its description, its progress on each device, and the words
+//! looked up in it.
 
 use epubsync_core::device::ReadStatus;
 use epubsync_core::library::{Book, Field, ProgressRow, WordRow, book_file_name};
@@ -77,6 +78,16 @@ fn body<'a>(open: &'a Open, book: &'a Book, selected: &'a Selected) -> Element<'
         );
     }
 
+    let open_button = button(text("Open").size(12))
+        .on_press(Message::OpenBook)
+        .padding([4, 9])
+        .style(theme::action);
+    let remove = button(text("Remove…").size(12))
+        .on_press_maybe(open.library.is_some().then_some(Message::AskRemove))
+        .padding([4, 9])
+        .style(theme::danger);
+    let actions = row![open_button, remove].spacing(8);
+
     let mut meta = column![].spacing(6);
     for f in book.fields() {
         let (label, value) = match f {
@@ -141,6 +152,7 @@ fn body<'a>(open: &'a Open, book: &'a Book, selected: &'a Selected) -> Element<'
 
     column![
         column![title, byline.wrap()].spacing(6),
+        actions,
         theme::hline(),
         meta,
         theme::hline(),
@@ -245,27 +257,18 @@ fn description_settings() -> markdown::Settings {
     markdown::Settings::with_text_size(15.5, style)
 }
 
-/// The full file path on one line, clipped, and the Remove… button. A
-/// click on the path shows the file in the system file manager. Remove…
-/// is off while the import task holds the library.
+/// The full file path on one line, clipped.
 fn footer<'a>(open: &'a Open, book: &'a Book) -> Element<'a, Message> {
     let path = open.folder.join(book_file_name(book.id));
-    let show = button(
+    container(
         text(path.display().to_string())
             .font(MONO)
             .size(11)
-            .wrapping(text::Wrapping::None),
+            .wrapping(text::Wrapping::None)
+            .style(theme::text_color(|c| c.muted)),
     )
-    .on_press(Message::Reveal(path))
-    .padding(0)
-    .style(theme::link);
-    let remove = button(text("Remove…").size(12))
-        .on_press_maybe(open.library.is_some().then_some(Message::AskRemove))
-        .padding([4, 9])
-        .style(theme::action);
-    row![container(show).width(Fill).clip(true), remove]
-        .spacing(12)
-        .align_y(Center)
-        .padding([5.0, INSET])
-        .into()
+    .width(Fill)
+    .clip(true)
+    .padding([9.0, INSET])
+    .into()
 }

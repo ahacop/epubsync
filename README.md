@@ -93,9 +93,8 @@ Finished column holds the day a book was finished, and the status bar
 counts the books finished this year. The Words tab in the toolbar swaps the
 table for every word looked up on a device, newest first, with the book,
 the device, and the day, and the filter field narrows it by word or book.
-A click on the file path in the sidebar shows the file in the system file
-manager, a click on the folder path in the status bar opens the library
-folder, and a link in a description opens in the browser. The Import button
+The Open button in the sidebar opens the book in the system reader, and a
+link in a description opens in the browser. The Import button
 and a drop of files onto the window add books. The Remove… button in the
 sidebar removes the selected book after a dialog that says what the
 removal does. The CLI stays the way to edit and sync.

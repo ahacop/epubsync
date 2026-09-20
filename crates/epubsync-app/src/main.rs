@@ -4,9 +4,9 @@
 //! reads the library again, and an Import button or a drop of files onto
 //! the window adds books, with a strip under the toolbar that shows the
 //! progress and gives the table the added books. A Remove… button in the
-//! sidebar removes the selected book after a dialog. The file path, the
-//! folder path, and the links in a description open in the system file
-//! manager or the browser. The CLI edits and syncs.
+//! sidebar removes the selected book after a dialog, and an Open button
+//! there opens the book in the system reader. A link in a description
+//! opens in the browser. The CLI edits and syncs.
 
 mod description;
 mod detail;
@@ -22,7 +22,7 @@ use std::path::PathBuf;
 
 use epubsync_core::config;
 use epubsync_core::device::ReadStatus;
-use epubsync_core::library::{Book, Library, ProgressRow, WordRow};
+use epubsync_core::library::{Book, Library, ProgressRow, WordRow, book_file_name};
 use epubsync_core::query::{self, Query, Sort, SortKey};
 use iced::event::{self, Event, Status};
 use iced::keyboard::{self, key};
@@ -131,16 +131,13 @@ enum Message {
     /// The × on the import strip. The pane goes back to the query and
     /// the scroll offset from before the import.
     ClearImport,
-    /// A click on the sidebar's file path. The system file manager
-    /// shows the file.
-    Reveal(PathBuf),
-    /// A click on the status bar's folder path. The system file manager
-    /// opens the library folder.
-    OpenFolder,
+    /// The Open button in the sidebar. The system reader opens the
+    /// selected book's file.
+    OpenBook,
     /// A click on a link in the description. The browser opens it.
     OpenLink(String),
-    /// The file manager or the browser could not be reached. The status
-    /// bar shows why.
+    /// The reader or the browser could not be started. The status bar
+    /// shows why.
     OpenFailed(String),
     /// The Remove… button in the sidebar. The remove dialog opens on the
     /// selected book.
@@ -267,6 +264,16 @@ impl Open {
         }
     }
 
+    /// Opens the selected book's file in the system reader, or does
+    /// nothing while no book is selected.
+    fn open_book(&self) -> Task<Message> {
+        let Some(selected) = &self.selected else {
+            return Task::none();
+        };
+        let path = self.folder.join(book_file_name(selected.id));
+        launch("open the book", move || opener::open(path))
+    }
+
     /// Puts the book in the sidebar. Its description is parsed here, so
     /// a book that is never shown is never parsed. An id no book has
     /// closes the sidebar.
@@ -388,13 +395,7 @@ fn update(viewer: &mut Viewer, message: Message) -> Task<Message> {
                 return table::scroll_to(scroll);
             }
         }
-        Message::Reveal(path) => {
-            return launch("show the file", move || opener::reveal(path));
-        }
-        Message::OpenFolder => {
-            let folder = open.folder.clone();
-            return launch("open the folder", move || opener::open(folder));
-        }
+        Message::OpenBook => return open.open_book(),
         Message::OpenLink(uri) => {
             return launch("open the link", move || opener::open_browser(uri));
         }
@@ -412,7 +413,7 @@ fn update(viewer: &mut Viewer, message: Message) -> Task<Message> {
 
 /// Runs one of the `opener` calls on a background task, because on macOS
 /// they wait for the `open` command to exit. A failure comes back as
-/// `Message::OpenFailed`, worded "Could not show the file: …"; a success
+/// `Message::OpenFailed`, worded "Could not open the book: …"; a success
 /// sends nothing.
 fn launch(
     what: &'static str,
@@ -571,15 +572,11 @@ fn status_bar(open: &Open) -> Element<'_, Message> {
             .style(theme::text_color(|c| c.muted)),
         counts,
         space().width(Fill),
-        button(
-            text(open.folder.display().to_string())
-                .font(MONO)
-                .size(11)
-                .wrapping(text::Wrapping::None)
-        )
-        .on_press(Message::OpenFolder)
-        .padding(0)
-        .style(theme::link),
+        text(open.folder.display().to_string())
+            .font(MONO)
+            .size(11)
+            .wrapping(text::Wrapping::None)
+            .style(theme::text_color(|c| c.muted)),
     ]
     .spacing(18)
     .align_y(Center)
@@ -590,7 +587,7 @@ fn status_bar(open: &Open) -> Element<'_, Message> {
 
 #[cfg(test)]
 mod tests {
-    use epubsync_core::library::{ImportOutcome, book_file_name};
+    use epubsync_core::library::ImportOutcome;
     use epubsync_epub::fixtures;
 
     use super::*;

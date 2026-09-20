@@ -1,5 +1,5 @@
-//! Remove from the viewer: the Remove… button in the sidebar footer and
-//! the dialog it opens. The dialog names the book and says what the
+//! Remove from the viewer: the Remove… button in the sidebar and the
+//! dialog it opens. The dialog names the book and says what the
 //! removal does. Its Remove button runs `Library::remove`, which deletes
 //! the file and marks the row, and the window reloads after.
 //!

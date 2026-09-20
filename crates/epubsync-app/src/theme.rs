@@ -247,13 +247,6 @@ pub fn header(sorted: bool) -> impl Fn(&Theme, button::Status) -> button::Style 
     }
 }
 
-/// A path that opens something when clicked, such as the sidebar's file
-/// path: no ground of its own. It reads in `muted`, and in `ink` under
-/// the pointer, the same as a column header.
-pub fn link(theme: &Theme, status: button::Status) -> button::Style {
-    header(false)(theme, status)
-}
-
 /// A toolbar tab: no ground of its own. The name reads in `ink` while
 /// its pane is in view and under the pointer, and in `muted` elsewhere,
 /// the same as a column header.
@@ -340,9 +333,10 @@ pub fn filter(theme: &Theme, status: text_input::Status) -> text_input::Style {
     }
 }
 
-/// A button that deletes something, such as Remove in the remove dialog:
-/// white text on `danger`, and on `danger_2` under the pointer. The
-/// label reads in `faint` on `surface_2` while the button is off.
+/// A button that deletes something, such as Remove… in the sidebar and
+/// Remove in the remove dialog: white text on `danger`, and on `danger_2`
+/// under the pointer. The label reads in `faint` on `surface_2` while
+/// the button is off.
 pub fn danger(theme: &Theme, status: button::Status) -> button::Style {
     let c = colors(theme);
     let (ground, ink) = match status {
