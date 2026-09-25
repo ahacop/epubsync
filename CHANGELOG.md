@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.9 (2026-09-25)
 
 The library keeps a reading history. Sync adds a row to a new
 `progress_history` table each time a book's percent, status, last read
@@ -63,6 +63,52 @@ fails partway, no longer leave a temp file in the library folder. Both
 now build in a temp file that is removed when the step returns an
 error. The import temp file is named `import-<random>.tmp` in place of
 `import.tmp`.
+
+The viewer shows each book's cover above the title in the sidebar. The
+library stores a thumbnail of each cover, at most 480 by 480 pixels, in
+a new `covers` table, and fills it for the books already in the library
+the first time it opens. A book whose file names no cover, names one the
+zip does not hold, or holds bytes that are not an image shows the words
+"No cover". A click on the thumbnail shows the full-size cover from the
+book file over the window. A click anywhere or Escape closes it.
+
+The viewer edits books. An Edit button between Open and Remove… turns
+the sidebar into a form with one input per field. Save makes the same
+edit as `epubsync edit`, and Cancel or Escape puts the details back. An
+empty input clears its field, an empty title is an error, an author with
+no sort name gets one made from the name, and the description goes in
+as typed, HTML and all.
+
+The viewer shows looked-up words. The sidebar ends with a Words block
+for the selected book, and a Words tab next to Library shows every word,
+newest first, with the book, the device, and the day. The filter field
+narrows that list by word or book title.
+
+`epubsync show <id>` prints one book: the authors with their sort names,
+the publisher, the series, the word count, the reading ease, the
+revision, the file path, the progress per device, and the description
+as Markdown.
+
+`list` takes a word to match against the title, an author, or the
+series, as the viewer's filter field does, and `--title`, `--author`,
+and `--series` to match one field. `--reading`, `--finished`, and
+`--unread` keep the books in that state. `--sort` takes one key or a
+comma list such as `author,title`, and `--reverse` turns the order
+around. The default is still id order.
+
+`list`, `show`, `words`, and `sync --dry-run` take `--json` and print
+the same data as JSON.
+
+`remove` keeps the book row and marks it removed, so a word looked up in
+a removed book keeps its title. Migration 3 drops the `book_title` and
+`volume_id` columns from `words`, and sync no longer stores a word from
+a Kobo book that is not in the library, such as a store book. Migration
+2 stops the library from giving a new book the id of a removed one,
+which showed the old book's words under the new book.
+
+CI builds aarch64 Linux and pushes the Linux builds to the public
+`ahacop` Cachix cache, so a NixOS install no longer compiles from
+source. The flake drops the Intel Mac target.
 
 ## 0.1.8 (2026-09-17)
 
