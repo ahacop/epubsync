@@ -9,7 +9,8 @@
 //! cover there opens it at full size over the window. A link in a
 //! description opens in the browser. An Edit button in the sidebar turns
 //! the body into a form that writes the book's fields back to the
-//! library. The CLI syncs.
+//! library. A Sync tab looks for the Kobo and shows the plan, which the
+//! Sync button there runs, and an Eject button there ejects the Kobo.
 
 mod description;
 mod detail;
@@ -17,18 +18,22 @@ mod dictionary;
 mod edit;
 mod format;
 mod full_cover;
+mod handoff;
 mod import;
 mod remove;
+mod sync;
 mod table;
 mod theme;
 mod words;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::time::Instant;
 
 use epubsync_core::config;
 use epubsync_core::cover::Cover;
 use epubsync_core::device::ReadStatus;
+use epubsync_core::kobo::Kobo;
 use epubsync_core::library::{Book, FileCover, Library, ProgressRow, WordRow, book_file_name};
 use epubsync_core::query::{self, Query, Sort, SortKey};
 use iced::event::{self, Event, Status};
@@ -37,7 +42,9 @@ use iced::widget::{button, column, container, image, markdown, row, space, text,
 use iced::{Center, Element, Fill, Subscription, Task, padding, window};
 
 use crate::edit::Form;
-use crate::import::{Handoff, Import, Line, Tab};
+use crate::handoff::Handoff;
+use crate::import::{Import, Line, Tab};
+use crate::sync::{Counts, Ejected, Plan, Sync};
 use crate::theme::{BODY, MONO, SANS_SEMIBOLD};
 
 /// The state of the viewer window: what it draws.
@@ -101,15 +108,21 @@ struct Open {
     /// The query and the scroll offset from before the import, set aside
     /// when a strip takes the pane and put back when the × clears it.
     before: Option<(Query, f32)>,
+    /// What the sync pane shows: the plan, where the sync is, and what
+    /// the last sync came to. It holds the device while a plan is in
+    /// view.
+    sync: Sync,
     /// Whether files are held over the window in a drag.
     hovering: bool,
 }
 
-/// The pane in the main area: the table of books, or the list of words.
+/// The pane in the main area: the table of books, the list of words, or
+/// the sync plan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Pane {
     Books,
     Words,
+    Sync,
 }
 
 /// What the sidebar shows: a book's details, or the form that edits them.
@@ -164,7 +177,7 @@ enum Message {
     /// A file was dropped onto the window.
     Dropped(PathBuf),
     /// The import task finished one file and hands the library back.
-    Imported(Handoff, Line),
+    Imported(Handoff<Library>, Line),
     /// The Cancel button on the import strip. The queued files are
     /// dropped; the file in flight finishes.
     CancelImport,
@@ -202,6 +215,29 @@ enum Message {
     ConfirmRemove,
     /// The dialog's Cancel button, a click outside the dialog, or Escape.
     CancelRemove,
+    /// The Plan button in the sync pane. The viewer looks for the Kobo
+    /// and reads the plan. The first visit to the pane does the same.
+    Plan,
+    /// The planning task hands the library back with the plan, or with
+    /// the reason there is none.
+    SyncPlanned(Handoff<(Library, Result<Plan, String>)>),
+    /// The Sync button in the sync pane. The actions in the plan run.
+    RunSync,
+    /// The sync task ran one action and hands the library and the device
+    /// back.
+    Synced(Handoff<(Library, Kobo)>, Result<(), String>),
+    /// The sync task wrote the Kobo rows and read progress back.
+    SyncRead(Handoff<(Library, Kobo)>, Result<Counts, String>),
+    /// The Cancel button in the sync pane. The actions that have not
+    /// started are dropped; the one in flight finishes.
+    CancelSync,
+    /// The Eject button in the sync pane.
+    Eject,
+    /// The eject task is done.
+    Ejected(Ejected),
+    /// A frame was drawn while the sync pane's activity bar is in view.
+    /// The block on the bar moves.
+    Tick(Instant),
 }
 
 fn main() -> iced::Result {
@@ -221,8 +257,12 @@ fn main() -> iced::Result {
 /// Escape closes the sidebar, and a file drag or drop on the window
 /// starts an import. The filter field takes Escape first while it has
 /// focus, to drop the focus, so only an ignored Escape counts.
-fn subscription(_viewer: &Viewer) -> Subscription<Message> {
-    event::listen_with(|event, status, _window| match event {
+///
+/// While the sync pane's activity bar is in view, each drawn frame sends
+/// a tick, which asks for the next frame. The ticks stop with the task,
+/// so an idle window draws nothing.
+fn subscription(viewer: &Viewer) -> Subscription<Message> {
+    let events = event::listen_with(|event, status, _window| match event {
         Event::Keyboard(keyboard::Event::KeyPressed {
             key: keyboard::Key::Named(key::Named::Escape),
             ..
@@ -231,7 +271,12 @@ fn subscription(_viewer: &Viewer) -> Subscription<Message> {
         Event::Window(window::Event::FilesHoveredLeft) => Some(Message::Hovering(false)),
         Event::Window(window::Event::FileDropped(path)) => Some(Message::Dropped(path)),
         _ => None,
-    })
+    });
+    let frames = match viewer {
+        Viewer::Open(open) if open.sync.animating() => window::frames().map(Message::Tick),
+        _ => Subscription::none(),
+    };
+    Subscription::batch([events, frames])
 }
 
 /// The state at start: the open library, or the reason it did not open.
@@ -269,6 +314,7 @@ impl Open {
             error: None,
             import: None,
             before: None,
+            sync: Sync::new(),
             hovering: false,
         };
         open.read()?;
@@ -500,7 +546,15 @@ impl Open {
     /// Queues paths for import and starts the task if it is idle. Paths
     /// that arrive while an import runs join its queue. Paths that
     /// arrive after one ended start a new strip in place of the old.
+    ///
+    /// The sync task holds the library while it runs, so paths that
+    /// arrive then are refused with a sentence in the status bar rather
+    /// than queued into a strip that cannot start.
     fn import(&mut self, paths: &[PathBuf]) -> Task<Message> {
+        if self.sync.running() {
+            self.error = Some("The sync is running. Import when it ends.".to_string());
+            return Task::none();
+        }
         let mut task = Task::none();
         if !self.import.as_ref().is_some_and(Import::running) {
             task = self.begin();
@@ -525,6 +579,19 @@ impl Open {
             sort: Sort::by(SortKey::Id),
             ..Query::default()
         };
+        self.scroll_home()
+    }
+
+    /// Puts a pane in the main area, at the top. The panes share one
+    /// scrollable, so a new pane starts at the top rather than at the old
+    /// pane's offset.
+    fn show(&mut self, pane: Pane) -> Task<Message> {
+        self.pane = pane;
+        self.scroll_home()
+    }
+
+    /// Scrolls the pane in view to the top.
+    fn scroll_home(&mut self) -> Task<Message> {
         self.scroll = 0.0;
         table::scroll_to_top()
     }
@@ -547,13 +614,17 @@ fn update(viewer: &mut Viewer, message: Message) -> Task<Message> {
         Message::Close if matches!(open.sidebar, Some(Sidebar::Edit(_))) => open.cancel_edit(),
         Message::Close => open.sidebar = None,
         Message::Show(pane) => {
-            // The two panes share one scrollable id, so the new pane
-            // starts at the top rather than at the old pane's offset.
+            // A click on the Sync tab with no plan in view looks for the
+            // Kobo, so the plan is there without a second click.
+            let plan = if pane == Pane::Sync && open.sync.idle() {
+                open.sync.make_plan(&mut open.library)
+            } else {
+                Task::none()
+            };
             if open.pane != pane {
-                open.pane = pane;
-                open.scroll = 0.0;
-                return table::scroll_to_top();
+                return Task::batch([open.show(pane), plan]);
             }
+            return plan;
         }
         Message::Sort(key) => {
             let sort = &mut open.query.sort;
@@ -566,8 +637,7 @@ fn update(viewer: &mut Viewer, message: Message) -> Task<Message> {
         Message::Filter(text) => {
             // A new filter shows its matches from the top.
             open.query.filter.text = text;
-            open.scroll = 0.0;
-            return table::scroll_to_top();
+            return open.scroll_home();
         }
         Message::Scrolled(offset) => open.scroll = offset,
         Message::Reload => open.reload(),
@@ -599,9 +669,7 @@ fn update(viewer: &mut Viewer, message: Message) -> Task<Message> {
             // Each tab shows its rows from the top, in the books pane.
             if let Some(import) = &mut open.import {
                 import.show(tab);
-                open.pane = Pane::Books;
-                open.scroll = 0.0;
-                return table::scroll_to_top();
+                return open.show(Pane::Books);
             }
         }
         Message::ClearImport => {
@@ -634,6 +702,23 @@ fn update(viewer: &mut Viewer, message: Message) -> Task<Message> {
             }
         }
         Message::CancelRemove => open.removing = None,
+        Message::Plan => return open.sync.make_plan(&mut open.library),
+        Message::SyncPlanned(handoff) => open.library = open.sync.planned(handoff.take()),
+        Message::RunSync => return open.sync.run(&mut open.library),
+        Message::Synced(handoff, result) => {
+            open.library = open.sync.synced(handoff.take(), result);
+            return open.sync.step(&mut open.library);
+        }
+        Message::SyncRead(handoff, counts) => {
+            open.library = open.sync.read(handoff.take(), counts);
+            // The read back writes progress and words, so the panes read
+            // the library again.
+            open.reload();
+        }
+        Message::CancelSync => open.sync.cancel(),
+        Message::Eject => return open.sync.eject(),
+        Message::Ejected(ejected) => open.sync.ejected(ejected),
+        Message::Tick(at) => open.sync.tick(at),
     }
     Task::none()
 }
@@ -672,6 +757,7 @@ fn view(viewer: &Viewer) -> Element<'_, Message> {
                     let n = rows.len();
                     (words::view(open, rows), n)
                 }
+                Pane::Sync => (sync::view(open, &open.sync), open.sync.len()),
             };
             let shown = open.sidebar.as_ref().and_then(|s| {
                 let book = open.books.iter().find(|b| b.id == s.id())?;
@@ -717,23 +803,32 @@ fn count(n: usize, noun: &str) -> String {
     }
 }
 
-/// The toolbar: the Library and Words tabs, the count for the pane in
-/// view, the filter field, and the Import and Reload buttons. The count
-/// reads "4 of 23 books" while the filter is set. Reload is off while
-/// the import task holds the library.
+/// The toolbar: the Library, Words, and Sync tabs, the count for the pane
+/// in view, the filter field, and the Import… and Reload buttons. The
+/// count reads "4 of 23 books" while the filter is set, and is empty on
+/// the sync pane while it holds no plan. The filter field is out of the
+/// toolbar on the sync pane, which it does not narrow. Reload is off while
+/// the import or a sync task holds the library, and Import… is off while
+/// a sync task holds it.
 fn toolbar<'a>(open: &'a Open, shown: usize) -> Element<'a, Message> {
-    let (total, noun, placeholder) = match open.pane {
-        Pane::Books => (
-            open.books.len(),
-            "book",
-            "Filter by title, author, or series",
-        ),
-        Pane::Words => (open.words.len(), "word", "Filter by word or book"),
+    let filtered = |total: usize, noun: &str| {
+        if open.query.filter.is_empty() {
+            count(total, noun)
+        } else {
+            format!("{shown} of {}", count(total, noun))
+        }
     };
-    let count = if open.query.filter.is_empty() {
-        count(total, noun)
-    } else {
-        format!("{shown} of {}", count(total, noun))
+    let (count, placeholder) = match open.pane {
+        Pane::Books => (
+            filtered(open.books.len(), "book"),
+            Some("Filter by title, author, or series"),
+        ),
+        Pane::Words => (
+            filtered(open.words.len(), "word"),
+            Some("Filter by word or book"),
+        ),
+        Pane::Sync if shown == 0 => (String::new(), None),
+        Pane::Sync => (count(shown, "action"), None),
     };
     let tab = |label: &'static str, pane: Pane| {
         button(text(label).size(14).font(SANS_SEMIBOLD))
@@ -741,12 +836,16 @@ fn toolbar<'a>(open: &'a Open, shown: usize) -> Element<'a, Message> {
             .padding(0)
             .style(theme::tab(open.pane == pane))
     };
-    let filter = text_input(placeholder, &open.query.filter.text)
-        .on_input(Message::Filter)
-        .width(300)
-        .size(13)
-        .padding([5, 10])
-        .style(theme::filter);
+    let filter = placeholder.map(|placeholder| {
+        Element::from(
+            text_input(placeholder, &open.query.filter.text)
+                .on_input(Message::Filter)
+                .width(300)
+                .size(13)
+                .padding([5, 10])
+                .style(theme::filter),
+        )
+    });
     let action = |label: &'static str, message: Option<Message>| {
         button(text(label).size(13))
             .on_press_maybe(message)
@@ -756,12 +855,19 @@ fn toolbar<'a>(open: &'a Open, shown: usize) -> Element<'a, Message> {
     let bar = row![
         tab("Library", Pane::Books),
         tab("Words", Pane::Words),
+        tab("Sync", Pane::Sync),
         text(count).size(BODY).style(theme::text_color(|c| c.muted)),
         space().width(Fill),
-        filter,
-        action("Import…", Some(Message::Pick)),
-        action("Reload", open.library.is_some().then_some(Message::Reload)),
     ]
+    .extend(filter)
+    .push(action(
+        "Import…",
+        (!open.sync.running()).then_some(Message::Pick),
+    ))
+    .push(action(
+        "Reload",
+        open.library.is_some().then_some(Message::Reload),
+    ))
     .spacing(14)
     .align_y(Center)
     .height(46)
@@ -983,6 +1089,50 @@ mod tests {
         let _ = update(&mut viewer, typed("Typed"));
         let _ = update(&mut viewer, Message::Reload);
         assert_eq!(form(&viewer).title, "Typed");
+    }
+
+    /// The first click on the Sync tab starts the planning task, which
+    /// takes the library. A second click while it is out starts nothing.
+    #[test]
+    fn the_first_visit_to_the_sync_tab_starts_the_plan() {
+        let (_dir, mut viewer, _id) = with_one_book();
+        let _ = update(&mut viewer, Message::Show(Pane::Sync));
+        let open = state(&viewer);
+        assert_eq!(open.pane, Pane::Sync);
+        assert!(open.sync.running());
+        assert!(open.sync.animating());
+        assert!(open.library.is_none());
+
+        let _ = update(&mut viewer, Message::Show(Pane::Books));
+        let _ = update(&mut viewer, Message::Show(Pane::Sync));
+        assert!(state(&viewer).sync.running());
+    }
+
+    /// The plan the task hands back fills the pane and gives the library
+    /// back, and a later visit to the tab keeps the plan. The plan is
+    /// built here, since the task scans the mount folders of the machine
+    /// the test runs on.
+    #[test]
+    fn a_plan_fills_the_sync_pane_and_stays_on_a_later_visit() {
+        let (dir, mut viewer, _id) = with_one_book();
+        let root = sync::library_tests::fake_kobo(dir.path());
+        let Viewer::Open(open) = &mut viewer else {
+            panic!("the library did not open");
+        };
+        let library = open.library.take().expect("the library is here");
+        let plan = sync::plan(&library, Kobo::at(&root).unwrap()).unwrap();
+
+        let handoff = Handoff::new((library, Ok(plan)));
+        let _ = update(&mut viewer, Message::SyncPlanned(handoff));
+        let open = state(&viewer);
+        assert!(open.library.is_some());
+        assert_eq!(open.sync.len(), 1);
+        assert!(!open.sync.running());
+
+        let _ = update(&mut viewer, Message::Show(Pane::Sync));
+        let open = state(&viewer);
+        assert!(open.library.is_some());
+        assert_eq!(open.sync.len(), 1);
     }
 
     #[test]

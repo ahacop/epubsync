@@ -35,6 +35,33 @@ fn detect_finds_kobos_under_the_roots() {
 }
 
 #[test]
+fn detect_one_wants_exactly_one_kobo() {
+    let dir = tempfile::tempdir().unwrap();
+    let media = dir.path().join("media");
+    let err = kobo::detect_one(std::slice::from_ref(&media))
+        .err()
+        .unwrap();
+    assert_eq!(err.to_string(), "no Kobo found");
+
+    fake_kobo(&media, "KOBOeReader", "N4181A");
+    let kobo = kobo::detect_one(std::slice::from_ref(&media)).unwrap();
+    assert_eq!(kobo.serial, "N4181A");
+
+    fake_kobo(&media, "KOBO2", "N4181B");
+    let err = kobo::detect_one(std::slice::from_ref(&media))
+        .err()
+        .unwrap();
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "more than one Kobo found: {}, {}",
+            media.join("KOBO2").display(),
+            media.join("KOBOeReader").display()
+        )
+    );
+}
+
+#[test]
 fn list_parses_ids_from_file_names() {
     let dir = tempfile::tempdir().unwrap();
     let root = fake_kobo(dir.path(), "KOBOeReader", "N1");

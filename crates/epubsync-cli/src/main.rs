@@ -757,24 +757,7 @@ fn plan_json<'a>(lib: &Library, kobo: &'a Kobo, gate: &'a Gate) -> Result<PlanJs
 
 fn sync(config: &Config, flags: SyncFlags) -> Result<()> {
     let mut lib = Library::open(config)?;
-    let mut kobo = match &flags.device {
-        Some(path) => Kobo::at(path)?,
-        None => {
-            let mut found = kobo::detect(&kobo::default_roots());
-            match found.len() {
-                0 => bail!("no Kobo found. Plug it in, or pass --device <path>"),
-                1 => found.remove(0),
-                _ => {
-                    let roots: Vec<String> =
-                        found.iter().map(|k| k.root.display().to_string()).collect();
-                    bail!(
-                        "more than one Kobo found: {}. Pass --device <path>",
-                        roots.join(", ")
-                    );
-                }
-            }
-        }
-    };
+    let mut kobo = find_kobo(flags.device.as_deref())?;
     if !flags.json {
         println!("Kobo {} at {}", kobo.serial(), kobo.root.display());
     }
@@ -885,21 +868,8 @@ fn sync(config: &Config, flags: SyncFlags) -> Result<()> {
 fn find_kobo(device: Option<&Path>) -> Result<Kobo> {
     match device {
         Some(path) => Kobo::at(path),
-        None => {
-            let mut found = kobo::detect(&kobo::default_roots());
-            match found.len() {
-                0 => bail!("no Kobo found. Plug it in, or pass --device <path>"),
-                1 => Ok(found.remove(0)),
-                _ => {
-                    let roots: Vec<String> =
-                        found.iter().map(|k| k.root.display().to_string()).collect();
-                    bail!(
-                        "more than one Kobo found: {}. Pass --device <path>",
-                        roots.join(", ")
-                    );
-                }
-            }
-        }
+        None => kobo::detect_one(&kobo::default_roots())
+            .map_err(|e| anyhow!("{e}. Plug in one Kobo, or pass --device <path>")),
     }
 }
 

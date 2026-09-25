@@ -43,8 +43,8 @@ The workspace has four crates in one dependency direction:
 - `epubsync-core` holds the library, the device layer, the sync, the Kobo
   device, the config, and the kepubify FFI.
 - `epubsync-cli` (binary `epubsync`) and `epubsync-app` (binary
-  `epubsync-app`) sit on top of core. The viewer imports, edits, and
-  removes books; sync goes through the CLI.
+  `epubsync-app`) sit on top of core. Both import, edit, and remove
+  books, and both sync to the Kobo.
 
 ### epubsync-epub
 
@@ -122,7 +122,8 @@ use `assert_cmd` against the built binary with a temp library.
 ### epubsync-app
 
 An Iced 0.14 window. The state is the `Viewer` enum in `main.rs`. It
-holds the open `Library`, what the panes draw, and the import under way.
+holds the open `Library`, what the panes draw, and the import and the
+sync under way.
 The window follows the system light or dark mode: `theme.rs` style
 functions read `is_dark` from the theme at draw time, so no view function
 knows the mode. The fonts are embedded from `fonts/`.
@@ -133,14 +134,27 @@ second click on a book reads no row. `select` fills the entry through
 words "No cover"; a book core has not read yet gets no entry, and the
 next click asks again.
 
-`import.rs` runs `Library::import` per file on a background task. Iced
-messages must be `Clone`, so the task takes the `Library` value and hands
-it back inside `Handoff`, and the state holds `None` in between. Reload is
-off while the library is away. A write from the viewer ends with a reload.
-While the import strip is shown, the books pane draws the rows of the
-strip's tab (Added, Skipped, Failed) through the same query, and `Open`
-keeps the query and the scroll offset from before the import in `before`
-until the × puts them back.
+`handoff.rs` holds `Handoff<T>`, the handle a background task gives a
+value back in. An Iced message must be `Clone` and `Debug`, and a
+`Library` is neither, so the task takes the value, puts it in the handle,
+and the update takes it out.
+
+`import.rs` runs `Library::import` per file on a background task. The task
+takes the `Library` value and hands it back in a `Handoff`, and the state
+holds `None` in between. Reload is off while the library is away. A write
+from the viewer ends with a reload. While the import strip is shown, the
+books pane draws the rows of the strip's tab (Added, Skipped, Failed)
+through the same query, and `Open` keeps the query and the scroll offset
+from before the import in `before` until the × puts them back.
+
+`sync.rs` holds the sync pane, which is `Pane::Sync`. `Open.sync` is
+always there, and `Sync.phase` says which head and which buttons the
+pane draws. `sync::plan` turns `core::sync::plan` and `gate` into one row
+per action. Every row runs, except a replacement the write gate holds
+back: the viewer has no partial sync. `Sync::step` runs one action per
+background task. Each task carries the `Library` and the `Kobo` and
+hands both back in a `Handoff`, so the state holds neither while one
+runs. The module doc says what the pane does.
 
 `Open.sidebar` is an `Option<Sidebar>`. `Sidebar::Read` holds the book
 id and its parsed description; `Sidebar::Edit` holds the `edit::Form`.

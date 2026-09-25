@@ -61,7 +61,7 @@ fn width(column: SortKey) -> Length {
 
 /// The width of the selected row's mark on the left edge. Every row and
 /// the header row leave this space, so the cells line up.
-const MARK: f32 = 3.0;
+pub const MARK: f32 = 3.0;
 
 /// The height of one row, and the pitch from one row to the next: the
 /// row and the 1 px line under it. The table builds only the rows in

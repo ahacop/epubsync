@@ -13,41 +13,17 @@
 //! same for one file and for a thousand.
 
 use std::collections::VecDeque;
-use std::fmt;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use epubsync_core::library::{ImportOutcome, Library};
 use iced::widget::{button, column, container, progress_bar, row, space, text};
 use iced::{Center, Element, Fill, Task, padding};
 
+use crate::handoff::Handoff;
 use crate::table::file_name;
 use crate::theme::{BODY, MONO, SANS_MEDIUM, SANS_SEMIBOLD};
 use crate::{Message, Open, format, table, theme};
-
-/// A library value on its way back from the import task. A message must
-/// be Clone and Debug, and a Library is neither, so the task hands the
-/// library back inside this handle and the update takes it out.
-#[derive(Clone)]
-pub struct Handoff(Arc<Mutex<Option<Library>>>);
-
-impl Handoff {
-    fn new(library: Library) -> Handoff {
-        Handoff(Arc::new(Mutex::new(Some(library))))
-    }
-
-    /// Takes the library out. A second take gets None.
-    pub fn take(&self) -> Option<Library> {
-        self.0.lock().unwrap_or_else(|e| e.into_inner()).take()
-    }
-}
-
-impl fmt::Debug for Handoff {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("Handoff")
-    }
-}
 
 /// What one file's import came to.
 #[derive(Debug, Clone, PartialEq)]

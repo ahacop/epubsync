@@ -102,7 +102,10 @@ and a drop of files onto the window add books. The Edit button in the
 sidebar turns the details into a form with one input per field, and Save
 writes the fields to the library and to the book file. The Remove… button
 in the sidebar removes the selected book after a dialog that says what the
-removal does. The CLI stays the way to sync.
+removal does. The Sync tab looks for the Kobo and shows the plan, one row
+per book to send, replace, or delete. The Sync button there runs the rows
+one at a time and then reads progress and words back, and the Eject
+button there ejects the Kobo.
 
 ```sh
 nix run github:ahacop/epubsync#app   # or, after brew install: epubsync-app

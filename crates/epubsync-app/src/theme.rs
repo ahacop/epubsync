@@ -441,3 +441,13 @@ pub fn dialog(theme: &Theme) -> container::Style {
         ..container::Style::default()
     }
 }
+
+/// A part of the sync pane's activity bar, the track or the block that
+/// slides along it: one color from the set with 2 px rounded ends, the
+/// shape of the progress bars.
+pub fn bar_part(pick: fn(&Colors) -> Color) -> impl Fn(&Theme) -> container::Style {
+    move |theme| container::Style {
+        border: border::rounded(2),
+        ..ground(pick)(theme)
+    }
+}

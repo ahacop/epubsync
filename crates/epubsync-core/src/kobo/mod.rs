@@ -67,6 +67,21 @@ pub fn detect(roots: &[PathBuf]) -> Vec<Kobo> {
     found
 }
 
+/// The one Kobo under `roots`. No Kobo and more than one Kobo are both
+/// errors, because a sync or an eject is for one device. The error for
+/// more than one names each root.
+pub fn detect_one(roots: &[PathBuf]) -> Result<Kobo> {
+    let mut found = detect(roots);
+    match found.len() {
+        0 => bail!("no Kobo found"),
+        1 => Ok(found.remove(0)),
+        _ => {
+            let paths: Vec<String> = found.iter().map(|k| k.root.display().to_string()).collect();
+            bail!("more than one Kobo found: {}", paths.join(", "))
+        }
+    }
+}
+
 impl Kobo {
     /// Opens the volume at `root`, which must hold `.kobo/version`. The
     /// first field of that file is the serial.
