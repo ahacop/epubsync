@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+The viewer shows definitions from Webster's Revised Unabridged Dictionary
+(1913). A click on a row in the Words tab opens a panel under the row with
+the dictionary's entries for the word, and a second click closes it. The
+lookup ignores case and finds inflected forms, so "vexed" shows the entry
+for "vex". The dictionary is embedded in the viewer, which makes the binary
+about 30 MB larger, and a lookup needs no network. A word from a Kobo
+dictionary other than English shows "No entry in Webster's 1913." The word
+in a row is now text that can be selected and copied.
+
 ## 0.1.9 (2026-09-25)
 
 The library keeps a reading history. Sync adds a row to a new

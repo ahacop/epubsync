@@ -560,6 +560,10 @@ impl HistoryRow {
 /// title comes from the book row, which stays after the book is removed.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct WordRow {
+    /// The row id in the `words` table. The viewer uses it to know which
+    /// row is open. The JSON output leaves it out.
+    #[serde(skip)]
+    pub id: i64,
     pub word: String,
     pub device_serial: String,
     pub book_id: i64,
@@ -627,19 +631,20 @@ impl Library {
     /// serial when given.
     pub fn words(&self, book_id: Option<i64>, device_serial: Option<&str>) -> Result<Vec<WordRow>> {
         let mut stmt = self.db.prepare(
-            "SELECT w.word, w.device_serial, w.book_id, b.title, w.dict_suffix, w.looked_up_at
+            "SELECT w.id, w.word, w.device_serial, w.book_id, b.title, w.dict_suffix, w.looked_up_at
              FROM words w JOIN books b ON b.id = w.book_id
              WHERE (?1 IS NULL OR w.book_id = ?1) AND (?2 IS NULL OR w.device_serial = ?2)
              ORDER BY w.looked_up_at DESC, w.id DESC",
         )?;
         let rows = stmt.query_map(params![book_id, device_serial], |r| {
             Ok(WordRow {
-                word: r.get(0)?,
-                device_serial: r.get(1)?,
-                book_id: r.get(2)?,
-                book_title: r.get(3)?,
-                dict_suffix: r.get(4)?,
-                looked_up_at: r.get(5)?,
+                id: r.get(0)?,
+                word: r.get(1)?,
+                device_serial: r.get(2)?,
+                book_id: r.get(3)?,
+                book_title: r.get(4)?,
+                dict_suffix: r.get(5)?,
+                looked_up_at: r.get(6)?,
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)

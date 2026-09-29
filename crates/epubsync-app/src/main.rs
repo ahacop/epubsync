@@ -13,6 +13,7 @@
 
 mod description;
 mod detail;
+mod dictionary;
 mod edit;
 mod format;
 mod full_cover;
@@ -63,6 +64,12 @@ struct Open {
     /// Every looked-up word, newest first. The words pane lists them all
     /// and the sidebar lists the selected book's.
     words: Vec<WordRow>,
+    /// The open row of the words pane, by word id, and its entries from
+    /// Webster's 1913 after `dictionary::plain`. An empty list is a word
+    /// the dictionary has no entry for; an error is a dictionary file
+    /// that did not unpack. The view reads the entries from here, so it
+    /// unpacks nothing while it draws.
+    definition: Option<(i64, Result<Vec<String>, String>)>,
     /// The pane in the main area.
     pane: Pane,
     /// The sorted column and the filter field's text, as the core query
@@ -137,6 +144,9 @@ enum Message {
     Close,
     /// A click on a toolbar tab.
     Show(Pane),
+    /// A click on a row of the words pane, by word id. It opens the
+    /// definition panel under the row, or closes it on the open row.
+    Define(i64),
     /// A click on a column header.
     Sort(SortKey),
     /// A change to the filter field.
@@ -248,6 +258,7 @@ impl Open {
             books: Vec::new(),
             progress: BTreeMap::new(),
             words: Vec::new(),
+            definition: None,
             pane: Pane::Books,
             query: Query::default(),
             scroll: 0.0,
@@ -439,6 +450,33 @@ impl Open {
         }
     }
 
+    /// Opens the definition panel under the word row `id`, or closes it
+    /// when `id` is the open row. Only one row is open at a time. A word
+    /// from a dictionary other than English gets no lookup and shows as
+    /// a word with no entry. The first lookup parses the dictionary
+    /// index.
+    fn define(&mut self, id: i64) {
+        if self
+            .definition
+            .as_ref()
+            .is_some_and(|(open, _)| *open == id)
+        {
+            self.definition = None;
+            return;
+        }
+        let Some(row) = self.words.iter().find(|w| w.id == id) else {
+            return;
+        };
+        let entries = if words::english(row) {
+            dictionary::define(&row.word)
+                .map(|entries| entries.iter().map(|e| dictionary::plain(e)).collect())
+                .map_err(|e| format!("{e:#}"))
+        } else {
+            Ok(Vec::new())
+        };
+        self.definition = Some((id, entries));
+    }
+
     /// Reads the selected book's file and puts its cover over the
     /// window at the size the publisher stored.
     fn show_cover(&mut self) {
@@ -498,6 +536,7 @@ fn update(viewer: &mut Viewer, message: Message) -> Task<Message> {
     };
     match message {
         Message::Select(id) => open.select(id),
+        Message::Define(id) => open.define(id),
         // Escape reaches Close while the dialog is shown, and cancels it.
         Message::Close if open.removing.is_some() => open.removing = None,
         Message::Close if open.full_cover.is_some() => open.full_cover = None,

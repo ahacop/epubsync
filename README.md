@@ -93,6 +93,8 @@ Finished column holds the day a book was finished, and the status bar
 counts the books finished this year. The Words tab in the toolbar swaps the
 table for every word looked up on a device, newest first, with the book,
 the device, and the day, and the filter field narrows it by word or book.
+A click on a word's row opens its entry from Webster's 1913 dictionary
+under the row, and the word itself can be selected and copied.
 The Open button in the sidebar opens the book in the system reader, and a
 link in a description opens in the browser. The Import button
 and a drop of files onto the window add books. The Edit button in the

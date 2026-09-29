@@ -137,8 +137,9 @@ pub fn failed_view<'a>(open: &'a Open, rows: Vec<(&'a Path, &'a str)>) -> Elemen
     ]
     .height(theme::HEADER)
     .align_y(Center);
-    let body =
-        responsive(move |size| self::rows(open.scroll, size, rows.len(), |i| failed_row(rows[i])));
+    let body = responsive(move |size| {
+        self::rows(open.scroll, size, rows.len(), None, |i| failed_row(rows[i]))
+    });
     frame(headers.into(), body)
 }
 
@@ -165,7 +166,7 @@ pub fn file_name(path: &Path) -> String {
 /// The table body: the rows the query selected, built through `rows`.
 fn body<'a>(open: &'a Open, rows: &[&'a Book], size: Size) -> Element<'a, Message> {
     let selected = open.sidebar.as_ref().map(Sidebar::id);
-    self::rows(open.scroll, size, rows.len(), |i| {
+    self::rows(open.scroll, size, rows.len(), None, |i| {
         book_row(rows[i], &open.progress, selected == Some(rows[i].id))
     })
 }
@@ -175,26 +176,71 @@ fn body<'a>(open: &'a Open, rows: &[&'a Book], size: Size) -> Element<'a, Messag
 /// rows above and below them, so the scrollbar and the wheel behave as if
 /// every row were there. Building every row would shape the text of
 /// thousands of cells on each redraw.
+///
+/// `open` is the index of a row that `build` makes taller, and the extra
+/// height. The words pane opens a row this way to show a definition
+/// under it.
 pub fn rows<'a>(
     scroll: f32,
     size: Size,
     len: usize,
+    open: Option<(usize, f32)>,
     build: impl Fn(usize) -> Element<'a, Message>,
 ) -> Element<'a, Message> {
-    // One row more than fits, since the first row in view is cut off at
-    // the top.
-    let in_view = (size.height / PITCH).ceil() as usize + 1;
-    let first = ((scroll / PITCH) as usize).min(len.saturating_sub(in_view));
-    let last = (first + in_view).min(len);
-    let built = column((first..last).map(build));
-    let above = space().height(first as f32 * PITCH);
-    let below = space().height((len - last) as f32 * PITCH);
+    let span = span(scroll, size.height, len, open);
+    let built = column((span.first..span.last).map(build));
+    let above = space().height(span.above);
+    let below = space().height(span.below);
     scrollable(column![above, built, below])
         .id(table_id())
         .on_scroll(|viewport| Message::Scrolled(viewport.absolute_offset().y))
         .width(Fill)
         .height(Fill)
         .into()
+}
+
+/// The rows that `rows` builds, from `first` up to but not including
+/// `last`, and the blank space above and below them in pixels.
+#[derive(Debug, PartialEq)]
+struct Span {
+    first: usize,
+    last: usize,
+    above: f32,
+    below: f32,
+}
+
+/// The rows in view at `scroll` in a view `height` pixels high, out of
+/// `len` rows at the row pitch. `open` is the index of a row with extra
+/// height, and that height. The rows under the open row move down by the
+/// extra height.
+///
+/// The span holds one row more than fits, since the first row in view is
+/// cut off at the top. At the end of the list it holds the last rows, so
+/// no blank space shows under them.
+fn span(scroll: f32, height: f32, len: usize, open: Option<(usize, f32)>) -> Span {
+    let in_view = (height / PITCH).ceil() as usize + 1;
+    let first = match open {
+        // The view starts under the open row and its extra height.
+        Some((row, extra)) if scroll >= (row + 1) as f32 * PITCH + extra => {
+            ((scroll - extra) / PITCH) as usize
+        }
+        // The view starts at the open row or above it.
+        Some((row, _)) => ((scroll / PITCH) as usize).min(row),
+        None => (scroll / PITCH) as usize,
+    };
+    let first = first.min(len.saturating_sub(in_view));
+    let last = (first + in_view).min(len);
+    let (above, below) = match open {
+        Some((row, extra)) if row < first => (extra, 0.0),
+        Some((row, extra)) if row >= last => (0.0, extra),
+        _ => (0.0, 0.0),
+    };
+    Span {
+        first,
+        last,
+        above: first as f32 * PITCH + above,
+        below: (len - last) as f32 * PITCH + below,
+    }
 }
 
 /// A column header: the name, and on the sorted column an arrow for the
@@ -383,4 +429,92 @@ pub fn chip<'a>(status: ReadStatus) -> Element<'a, Message> {
     .padding([1, 6])
     .style(theme::chip(status))
     .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A view 350 px high holds 10 rows at the pitch of 35 px, and the
+    // span holds 11.
+    const HEIGHT: f32 = 350.0;
+    const PANEL: f32 = 280.0;
+
+    fn pitch(rows: usize) -> f32 {
+        rows as f32 * PITCH
+    }
+
+    #[test]
+    fn with_no_open_row_the_span_starts_at_the_scroll_offset() {
+        let span = span(pitch(4) + 10.0, HEIGHT, 100, None);
+        assert_eq!(
+            span,
+            Span {
+                first: 4,
+                last: 15,
+                above: pitch(4),
+                below: pitch(85),
+            }
+        );
+    }
+
+    #[test]
+    fn an_open_row_above_the_view_adds_its_height_above() {
+        let span = span(pitch(10) + PANEL, HEIGHT, 100, Some((2, PANEL)));
+        assert_eq!(
+            span,
+            Span {
+                first: 10,
+                last: 21,
+                above: pitch(10) + PANEL,
+                below: pitch(79),
+            }
+        );
+    }
+
+    #[test]
+    fn an_open_row_in_the_view_is_built_with_the_rows() {
+        let span = span(pitch(3), HEIGHT, 100, Some((5, PANEL)));
+        assert_eq!(
+            span,
+            Span {
+                first: 3,
+                last: 14,
+                above: pitch(3),
+                below: pitch(86),
+            }
+        );
+        // A view that starts inside the panel starts at the open row.
+        let span = self::span(pitch(6) + 100.0, HEIGHT, 100, Some((5, PANEL)));
+        assert_eq!(span.first, 5);
+        assert_eq!(span.above, pitch(5));
+    }
+
+    #[test]
+    fn an_open_row_below_the_view_adds_its_height_below() {
+        let span = span(0.0, HEIGHT, 100, Some((50, PANEL)));
+        assert_eq!(
+            span,
+            Span {
+                first: 0,
+                last: 11,
+                above: 0.0,
+                below: pitch(89) + PANEL,
+            }
+        );
+    }
+
+    #[test]
+    fn the_rows_and_the_space_add_up_to_the_full_height() {
+        for scroll in [0.0, 500.0, 1000.0, 3000.0, 3600.0] {
+            let span = span(scroll, HEIGHT, 100, Some((20, PANEL)));
+            let built = pitch(span.last - span.first)
+                + if (span.first..span.last).contains(&20) {
+                    PANEL
+                } else {
+                    0.0
+                };
+            assert_eq!(span.above + built + span.below, pitch(100) + PANEL);
+        }
+    }
 }

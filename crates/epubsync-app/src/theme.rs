@@ -333,6 +333,23 @@ pub fn filter(theme: &Theme, status: text_input::Status) -> text_input::Style {
     }
 }
 
+/// The word in a row of the words pane: a text input that takes no
+/// input, drawn as plain `ink` text with no ground and no border. The
+/// input is always in the `Disabled` status, so the style reads no
+/// status. The selection is `accent` at 30 percent, which also shows on
+/// the open row's `accent_tint` ground.
+pub fn word(theme: &Theme, _status: text_input::Status) -> text_input::Style {
+    let c = colors(theme);
+    text_input::Style {
+        background: Background::Color(Color::TRANSPARENT),
+        border: Border::default(),
+        icon: c.muted,
+        placeholder: c.faint,
+        value: c.ink,
+        selection: Color { a: 0.3, ..c.accent },
+    }
+}
+
 /// The description editor in the edit form: the filter field's colors
 /// in a box of the same shape.
 pub fn editor(theme: &Theme, status: text_editor::Status) -> text_editor::Style {

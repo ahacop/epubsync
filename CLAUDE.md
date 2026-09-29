@@ -173,6 +173,25 @@ out of the book file. `Open.full_cover` holds the handle while the cover
 is shown, and `Message::Close` (Escape) closes it before it closes the
 sidebar.
 
+`dictionary.rs` looks words up in Webster's 1913. The StarDict files in
+`dictionary/` are embedded with `include_bytes!`, so they add about 30 MB
+to the binary, and the macOS release builds without a fetch. The first
+lookup parses `web1913.idx` into a map keyed by the lower-case word, which
+takes about 30 ms in a release build. `Dictzip` reads the `RA` field of
+the `.dict.dz` header and unpacks only the chunks that hold an entry.
+`plain` removes the dictd headword, the backslashes, and the braces, and
+keeps the pronunciation codes.
+
+A click on a row of the words pane sends `Message::Define` with the word
+id, which is `WordRow.id`. `Open.definition` holds the open row's id and
+its entries, so the view unpacks nothing while it draws. The open row is
+280 px taller than the others, and `table::rows` takes its index and the
+extra height so that `span` builds the right rows. `span` is pure and has
+its own tests. The Word cell is a `text_input` with no `on_input`, so the
+word can be selected and copied. The input captures clicks, so
+`words::word` measures the text and gives the input only that width. A
+word whose `dict_suffix` is not `-en` gets no lookup.
+
 The Open button and the description links go through the `opener` crate
 on a background task, because on macOS `open` waits for the command to
 exit. A failure lands in `Open.error`, which the status bar shows.

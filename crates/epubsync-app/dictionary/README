@@ -1,0 +1,12 @@
+Webster's Revised Unabridged Dictionary (1913), in StarDict format.
+
+The files come from stardict-dictd-web1913-2.4.2.tgz in
+https://github.com/ahacop/websters-dict-1913-stardict, which converts
+the dict.org web1913 database. They are renamed from
+dictd_www.dict.org_web1913.* and are otherwise unchanged.
+
+The text of the dictionary is in the public domain.
+
+The viewer embeds web1913.idx and web1913.dict.dz. web1913.ifo is kept
+because it records the entry format (sametypesequence=m) and the word
+count that the index must match.
