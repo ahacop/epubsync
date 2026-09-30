@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.10 (2026-09-30)
 
 The viewer shows definitions from Webster's Revised Unabridged Dictionary
 (1913). A click on a row in the Words tab opens a panel under the row with
