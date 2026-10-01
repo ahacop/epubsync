@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.1.11 (2026-10-01)
+
+The viewer syncs to the Kobo. The toolbar gets a Sync tab after Words.
+The first click on it looks for the device on a background task, with a
+bar that moves while it looks, and fills the pane with the plan: the
+device and its database version, then one row per action with the book
+id, the title, and a state. On a firmware version the app has not been
+run against, the replacements read "held back", as `epubsync sync`
+without `--allow-newer-firmware` skips them. The Sync button runs the
+rows that are not held back, one at a time on a background task, so the
+window stays live and each row turns to "sent", "replaced", or "deleted"
+as it lands, with a progress bar under the head. A row that fails keeps
+the sync going and puts its error under the head. Cancel stops after the
+book being copied, and the next sync picks up the rest. Then the same
+task deletes the macOS `._` files, writes the Kobo rows, and reads
+progress and words back, and the pane reads "Synced in 1 min 14 s" with
+a line of counts. The Plan button looks for the device again. The Eject
+button closes the Kobo database, unmounts the volume, and sends the SCSI
+eject, the same as `epubsync eject`. An import is refused while a sync
+runs.
+
+`epubsync open <id>` opens a book in the system reader, as the viewer's
+Open button does.
+
+A book deleted on the Kobo and then sent again by a sync could stay
+hidden, because the Kobo can keep the book's old database row after the
+delete. Sync now deletes that row before it copies the book, as
+Calibre does.
+
 ## 0.1.10 (2026-09-30)
 
 The viewer shows definitions from Webster's Revised Unabridged Dictionary
