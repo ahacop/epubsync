@@ -219,6 +219,25 @@ fn update_file_size() {
 }
 
 #[test]
+fn delete_stale_content_leaves_a_live_row_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = fake_kobo(dir.path(), "N1", UNTESTED);
+    let db = open_db(&root);
+    assert!(!db.delete_stale_content(VOLUME_1).unwrap());
+    insert_content(&root, VOLUME_1, "T", "A", 1000);
+    assert!(!db.delete_stale_content(VOLUME_1).unwrap());
+    assert!(db.find_content(VOLUME_1).unwrap().is_some());
+    raw(&root)
+        .execute(
+            "UPDATE content SET IsDownloaded = 'false' WHERE ContentID = ?1",
+            [VOLUME_1],
+        )
+        .unwrap();
+    assert!(db.delete_stale_content(VOLUME_1).unwrap());
+    assert!(db.find_content(VOLUME_1).unwrap().is_none());
+}
+
+#[test]
 fn reads_progress() {
     let dir = tempfile::tempdir().unwrap();
     let root = fake_kobo(dir.path(), "N1", UNTESTED);
@@ -489,6 +508,22 @@ fn apply_updates_the_file_size_on_replace_and_sends_again_after_a_device_delete(
     assert_eq!(actions, vec![Action::SendAgain { id, revision: 2 }]);
     sync::apply(&mut lib, &mut kobo, &actions, |_| {}).unwrap();
     assert!(kobo.book_path(id).exists());
+
+    // Deleted on the device with the row left behind: sync deletes the
+    // row before it copies the file.
+    std::fs::remove_file(kobo.book_path(id)).unwrap();
+    insert_content(&root, VOLUME_1, "T", "A", 1);
+    raw(&root)
+        .execute(
+            "UPDATE content SET IsDownloaded = 'false' WHERE ContentID = ?1",
+            [VOLUME_1],
+        )
+        .unwrap();
+    let actions = sync::plan(&lib, &kobo).unwrap();
+    assert_eq!(actions, vec![Action::SendAgain { id, revision: 2 }]);
+    sync::apply(&mut lib, &mut kobo, &actions, |_| {}).unwrap();
+    assert!(kobo.book_path(id).exists());
+    assert!(open_db(&root).find_content(VOLUME_1).unwrap().is_none());
 
     // With the gate up, a replace leaves the row alone.
     kobo.open_db(false).unwrap();

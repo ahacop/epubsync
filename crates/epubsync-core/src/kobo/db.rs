@@ -79,6 +79,21 @@ impl KoboDb {
         Ok(n > 0)
     }
 
+    /// Deletes the `content` row the firmware can leave behind when a book
+    /// is deleted on the device, so a copy of the book to the same path
+    /// gets a fresh row at the next scan. A book copied on top of that row
+    /// can stay hidden. The row has `Accessibility` 1 and `IsDownloaded`
+    /// false, the form Calibre's driver deletes. A live row is left alone.
+    /// Returns false when there is no such row.
+    pub fn delete_stale_content(&self, volume_id: &str) -> Result<bool> {
+        let n = self.conn.execute(
+            "DELETE FROM content WHERE ContentID = ?1 AND ContentType = '6'
+             AND Accessibility = 1 AND IsDownloaded IN ('false', 0)",
+            [volume_id],
+        )?;
+        Ok(n > 0)
+    }
+
     /// The percent read, the read status, the last read time, and the
     /// reading time for a book path. `book_id` is copied into the result.
     pub fn progress(&self, volume_id: &str, book_id: i64) -> Result<Option<Progress>> {

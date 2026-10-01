@@ -206,6 +206,11 @@ impl Device for Kobo {
         match action {
             Action::Send { .. } | Action::Replace { .. } | Action::SendAgain { .. } => {
                 std::fs::create_dir_all(self.folder())?;
+                if !matches!(action, Action::Replace { .. })
+                    && let Db::Writable(db) = &self.db
+                {
+                    db.delete_stale_content(&volume_id)?;
+                }
                 let size = copy_bytes(source, &target)
                     .with_context(|| format!("copy to {}", target.display()))?;
                 if matches!(action, Action::Replace { .. })
