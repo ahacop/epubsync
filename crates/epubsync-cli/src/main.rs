@@ -85,6 +85,8 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Open a book's file in the system reader
+    Open { book: i64 },
     /// Edit a book's metadata in $EDITOR, or one field per flag
     Edit {
         book: i64,
@@ -243,6 +245,7 @@ fn run(command: Command) -> Result<()> {
             list(&config, &query, json)
         }
         Command::Show { book, json } => show(&config, book, json),
+        Command::Open { book } => open(&config, book),
         Command::Edit {
             book,
             title,
@@ -383,6 +386,18 @@ fn list(config: &Config, query: &Query, json: bool) -> Result<()> {
 /// blank line. A field the book does not have gets no line. The Device
 /// lines hold the progress per device, and the History lines hold every
 /// change a sync saw, oldest first.
+/// Hands the book's file to the system's opener: `xdg-open` on Linux,
+/// `open` on macOS. The library lock is let go first, so the viewer or
+/// another command can run while the reader is open.
+fn open(config: &Config, id: i64) -> Result<()> {
+    let path = {
+        let lib = Library::open(config)?;
+        lib.get(id)?;
+        lib.book_path(id)
+    };
+    opener::open(&path).with_context(|| format!("open {}", path.display()))
+}
+
 fn show(config: &Config, id: i64, json: bool) -> Result<()> {
     let lib = Library::open(config)?;
     let book = lib.get(id)?;

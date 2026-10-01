@@ -1086,6 +1086,7 @@ dependencies = [
  "epubsync-core",
  "htmd",
  "libc",
+ "opener",
  "predicates",
  "rusqlite",
  "serde",

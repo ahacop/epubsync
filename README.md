@@ -32,6 +32,7 @@ epubsync import book.epub           # convert to KEPUB and add it; a folder impo
 epubsync list                       # every book: id, title, authors, series, progress per device
 epubsync list --reading --sort title # the books being read, in title order
 epubsync show 3                     # one book's whole record, stats, file path, and progress
+epubsync open 3                     # open the book in the system reader
 epubsync edit 3                     # open the metadata as TOML in $EDITOR
 epubsync edit 3 --title "New Title" # set one field without the editor
 epubsync remove 3                   # delete the file and its rows

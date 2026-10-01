@@ -398,6 +398,17 @@ fn shows_one_book() {
 }
 
 #[test]
+fn open_fails_on_an_unknown_id() {
+    let env = Env::new();
+    env.init();
+    env.cmd()
+        .args(["open", "1"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no book with id 1"));
+}
+
+#[test]
 fn lists_progress_and_words() {
     let env = Env::new();
     env.init();
